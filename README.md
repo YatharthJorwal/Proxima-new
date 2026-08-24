@@ -26,32 +26,55 @@ PIPER_EXE_PATH=<path from step 3.2, or just "piper" if it's on your PATH>
 PIPER_VOICE_PATH=<full path to the .onnx file in your voices folder>
 ```
 
+Optional additions:
+```
+# Overrides the dashboard's global hotkey (default F9) if it conflicts
+# with something else on your system:
+PROXY_HOTKEY=F10
+
+# Optional: use ElevenLabs (paid, more natural voice) instead of Piper.
+# If either of these is missing, Proxy uses Piper automatically — no
+# cost unless you set both.
+ELEVENLABS_API_KEY=...
+ELEVENLABS_VOICE_ID=...
+```
+
 ### 5. Install dependencies
 ```
 npm install
 ```
+If npm warns about pending install scripts (`allow-scripts`), review and
+approve them: `npm approve-scripts --allow-scripts-pending`, then
+`npm install` again. This happens whenever a dependency with a native
+install step (Electron, the Whisper runtime, etc.) changes version.
 
 ## Every time you want to run it
-Make sure Ollama is running, then in the project folder:
+Make sure Ollama is running, then in the project folder, pick one:
+
+**Dashboard (recommended)** — a visual window showing what Proxy is doing
+in real time: what it heard, how it routed the command, what it replied,
+plus a typed-text input as an alternative to voice.
+```
+npm run dashboard
+```
+Once it's open, press **F9 anywhere** (the window doesn't need focus) to
+talk, or type into the Input box.
+
+**CLI only** — no window, just this terminal.
 ```
 npm run start
 ```
-
 Press **Enter** in that terminal window, speak your command, and Proxy will
 transcribe it, ask the local LLM, and speak the reply back.
 
-## Why "press Enter" instead of a hotkey or voice wake word?
-We tried two fancier options first:
-- **Picovoice** (say "Jarvis" to activate) — discontinued its free tier for
-  personal projects, so this was a dead end for now.
-- **A global hotkey** (press a key from anywhere, not just this terminal) —
-  the library for this runs a background key-hook process that Windows
-  Defender or another antivirus is likely to flag/remove, since silently
-  hooking every keystroke system-wide is a classic keylogger pattern.
-
-Pressing Enter in the terminal sidesteps both problems entirely — no account,
-no background process, no antivirus drama. A true global hotkey is still on
-the roadmap for later, once we build a proper desktop app around this.
+## About the hotkey
+Earlier versions of this project tried a background global-hotkey library
+that Windows Defender flagged and removed (silently hooking every keystroke
+system-wide looks like a keylogger to antivirus software, understandably).
+The dashboard's F9 hotkey uses Electron's `globalShortcut` API instead,
+which isn't a standalone background hook process, so it doesn't have the
+same problem. If F9 conflicts with something else on your system, override
+it with `PROXY_HOTKEY` in `.env` (see above).
 
 ## About npm install
 You only run `npm install` once per project setup (or again later if we add

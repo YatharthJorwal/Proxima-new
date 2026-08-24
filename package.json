@@ -3,10 +3,11 @@
   "version": "0.1.0",
   "description": "Proxima (\"Proxy\") — Jarvis-style Windows desktop assistant",
   "private": true,
-  "main": "dist/index.js",
+  "main": "dist/electron/main.js",
   "scripts": {
-    "build": "tsc",
-    "start": "ts-node src/core/assistant.ts"
+    "build": "tsc && node scripts/copy-assets.js",
+    "start": "ts-node src/core/assistant.ts",
+    "dashboard": "npm run build && electron ."
   },
   "dependencies": {
     "@huggingface/transformers": "^3.0.0",
@@ -17,7 +18,10 @@
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
+    "electron": "^43.4.1",
+    "three": "^0.185.1",
     "ts-node": "^10.9.2",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "three": "^0.185.1"
   }
 }

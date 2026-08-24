@@ -89,12 +89,18 @@ const TOOLS = [
   },
 ];
 
-export async function handleWithIntent(text: string): Promise<string> {
+export interface IntentResult {
+  reply: string;
+  // null = the model just replied conversationally, no tool called.
+  tool: string | null;
+}
+
+export async function handleWithIntent(text: string): Promise<IntentResult> {
   const { reply, toolCall } = await askProxyWithTools(text, TOOLS);
 
   if (!toolCall) {
     // The model looked at this and decided it's just conversation.
-    return reply ?? "";
+    return { reply: reply ?? "", tool: null };
   }
 
   // Defensive lowercasing in case the model doesn't stick exactly to the
@@ -102,24 +108,36 @@ export async function handleWithIntent(text: string): Promise<string> {
   try {
     switch (toolCall.name) {
       case "open_app":
-        return await executeOpenApp(String(toolCall.arguments.app_name ?? ""));
+        return {
+          reply: await executeOpenApp(String(toolCall.arguments.app_name ?? "")),
+          tool: toolCall.name,
+        };
 
       case "control_volume":
-        return await executeVolume(
-          String(toolCall.arguments.direction ?? "").toLowerCase() as VolumeDirection
-        );
+        return {
+          reply: await executeVolume(
+            String(toolCall.arguments.direction ?? "").toLowerCase() as VolumeDirection
+          ),
+          tool: toolCall.name,
+        };
 
       case "control_window":
-        return await executeWindow(
-          String(toolCall.arguments.action ?? "").toLowerCase() as WindowAction
-        );
+        return {
+          reply: await executeWindow(
+            String(toolCall.arguments.action ?? "").toLowerCase() as WindowAction
+          ),
+          tool: toolCall.name,
+        };
 
       default:
         console.warn("Model called an unrecognized tool:", toolCall.name);
-        return "I'm not sure how to do that yet.";
+        return { reply: "I'm not sure how to do that yet.", tool: toolCall.name };
     }
   } catch (err) {
     console.error("Failed to dispatch tool call:", toolCall, err);
-    return "I understood what you wanted, but something went wrong doing it.";
+    return {
+      reply: "I understood what you wanted, but something went wrong doing it.",
+      tool: toolCall.name,
+    };
   }
 }
