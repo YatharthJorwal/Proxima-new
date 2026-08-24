@@ -19,7 +19,17 @@ installs via pip:
    `piper --download en_US-lessac-medium`
    This downloads a voice model (`.onnx` + `.onnx.json`) into that folder.
 
-### 4. Project config
+### 4. Hand-tracking model (for the dashboard's Camera card, Milestone 7)
+Optional, but the Camera card won't track hands without it (it'll still
+show the live camera preview either way). One-time download:
+```
+npm run setup:cv
+```
+This saves `hand_landmarker.task` (~7-9MB) into a `models` folder. Re-run
+this if that file ever goes missing — it's gitignored on purpose (nothing
+about it needs to be shared/versioned), so a fresh clone won't have it.
+
+### 5. Project config
 In the project folder, create a file named `.env`:
 ```
 PIPER_EXE_PATH=<path from step 3.2, or just "piper" if it's on your PATH>
@@ -39,7 +49,7 @@ ELEVENLABS_API_KEY=...
 ELEVENLABS_VOICE_ID=...
 ```
 
-### 5. Install dependencies
+### 6. Install dependencies
 ```
 npm install
 ```
@@ -53,7 +63,10 @@ Make sure Ollama is running, then in the project folder, pick one:
 
 **Dashboard (recommended)** — a visual window showing what Proxy is doing
 in real time: what it heard, how it routed the command, what it replied,
-plus a typed-text input as an alternative to voice.
+plus a typed-text input as an alternative to voice, and a live camera
+feed with hand tracking (Milestone 7). Windows will prompt for camera
+permission the first time it opens — allow it, or the Camera card will
+just show "Camera unavailable."
 ```
 npm run dashboard
 ```

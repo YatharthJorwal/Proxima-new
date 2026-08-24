@@ -15,6 +15,9 @@
  */
 
 import * as THREE from "./vendor/three.module.js";
+// Note: MediaPipe (HandLandmarker) is NOT imported statically here —
+// it's dynamic-imported inside setupCameraAndHandTracking() below, on
+// purpose. See that function's docblock for why.
 
 // ---------- DOM refs ----------
 
@@ -344,6 +347,141 @@ window.proxy.on("error", (message) => {
   freezeActiveStage();
   flashError(message);
   appendLog("error", message);
+});
+
+// ================================================================
+// Camera / hand tracking (Milestone 7 — CV sprint). Webcam feed +
+// MediaPipe HandLandmarker, running entirely in-renderer as WASM (no
+// network calls once the model is downloaded once via `npm run
+// setup:cv` — see scripts/download-hand-model.js).
+//
+// Scope of this slice, on purpose: DETECT AND VISUALIZE hands only.
+// Gestures are NOT wired to any command yet — that's a deliberate
+// separate step with its own safety design, same reasoning as the
+// orchestration milestone: a new trigger surface gets its own safety
+// pass, not bundled in with the capability that makes it possible.
+// Right now this card only shows what Proxy can see.
+//
+// Everything below is wrapped in try/catch, and the MediaPipe module is
+// DYNAMIC-imported (not a top-level static import like three.js above)
+// specifically so that if vendoring failed, the model file is missing,
+// or the webcam is unavailable, the failure is contained to this one
+// card's status line — it cannot take down the rest of the dashboard.
+// This is a direct lesson from the preload channel-mismatch bug: an
+// uncaught failure at a module's top level silently breaks every line
+// of code after it in that same module. The orb, pipeline, and log
+// must keep working even if the camera can't start.
+// ================================================================
+
+async function setupCameraAndHandTracking() {
+  const video = document.getElementById("cameraVideo");
+  const overlay = document.getElementById("cameraOverlay");
+  const status = document.getElementById("cameraStatus");
+  const ctx = overlay.getContext("2d");
+
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+  } catch (err) {
+    status.textContent = `Camera unavailable (${err.name || "error"}) — check Windows camera permissions.`;
+    return;
+  }
+
+  video.srcObject = stream;
+  await new Promise((resolve) => {
+    video.onloadedmetadata = () => resolve();
+  });
+  await video.play();
+
+  status.textContent = "Loading hand-tracking model…";
+
+  let HandLandmarker, handLandmarker;
+  try {
+    const mediapipe = await import("./vendor/mediapipe/vision_bundle.mjs");
+    HandLandmarker = mediapipe.HandLandmarker;
+    const fileset = await mediapipe.FilesetResolver.forVisionTasks("./vendor/mediapipe/wasm");
+    handLandmarker = await HandLandmarker.createFromOptions(fileset, {
+      baseOptions: { modelAssetPath: "./vendor/mediapipe/hand_landmarker.task" },
+      runningMode: "VIDEO",
+      numHands: 2,
+    });
+  } catch (err) {
+    status.textContent = 'Hand-tracking model not found — run "npm run setup:cv", then rebuild.';
+    return; // camera preview still works, just no tracking overlay
+  }
+
+  function resizeOverlay() {
+    overlay.width = overlay.clientWidth;
+    overlay.height = overlay.clientHeight;
+  }
+  window.addEventListener("resize", resizeOverlay);
+  resizeOverlay();
+
+  function toCanvasMapper() {
+    // object-fit: cover mapping — the video element is scaled up to
+    // fill the container and cropped (see .camera-frame video in
+    // style.css), so landmark coordinates (normalized 0-1 against the
+    // FULL camera frame) need that same scale+crop applied, or the
+    // overlay skeleton drifts away from the actual hand at the edges.
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    const cw = overlay.width;
+    const ch = overlay.height;
+    if (!vw || !vh || !cw || !ch) return null;
+    const scale = Math.max(cw / vw, ch / vh);
+    const offsetX = (vw - cw / scale) / 2;
+    const offsetY = (vh - ch / scale) / 2;
+    return (nx, ny) => [(nx * vw - offsetX) * scale, (ny * vh - offsetY) * scale];
+  }
+
+  function drawHands(result) {
+    const cw = overlay.width;
+    const ch = overlay.height;
+    ctx.clearRect(0, 0, cw, ch);
+    const toCanvas = toCanvasMapper();
+    if (!toCanvas) return;
+
+    ctx.strokeStyle = "#3fa9ff";
+    ctx.fillStyle = "#7cd4ff";
+    ctx.lineWidth = 2;
+
+    for (const hand of result.landmarks) {
+      for (const { start, end } of HandLandmarker.HAND_CONNECTIONS) {
+        const [ax, ay] = toCanvas(hand[start].x, hand[start].y);
+        const [bx, by] = toCanvas(hand[end].x, hand[end].y);
+        ctx.beginPath();
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(bx, by);
+        ctx.stroke();
+      }
+      for (const point of hand) {
+        const [x, y] = toCanvas(point.x, point.y);
+        ctx.beginPath();
+        ctx.arc(x, y, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  function loop() {
+    requestAnimationFrame(loop);
+    if (video.readyState < 2) return; // not enough data for a frame yet
+    let result;
+    try {
+      result = handLandmarker.detectForVideo(video, performance.now());
+    } catch (err) {
+      return; // skip this frame rather than spamming the status line
+    }
+    drawHands(result);
+    const count = result.landmarks.length;
+    status.textContent = count === 0 ? "No hand detected" : `${count} hand${count > 1 ? "s" : ""} detected`;
+  }
+  requestAnimationFrame(loop);
+}
+
+setupCameraAndHandTracking().catch((err) => {
+  const status = document.getElementById("cameraStatus");
+  if (status) status.textContent = `Camera setup failed: ${err.message || err}`;
 });
 
 // ================================================================

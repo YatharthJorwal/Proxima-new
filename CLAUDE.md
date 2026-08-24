@@ -134,15 +134,14 @@ reliability reasons — current trigger is a plain Enter keypress.
    committing to an Electron shell for other reasons — this fixes the
    window-control focus-timing limitation from Milestone 3 (see Known
    limitations) as a side effect.
-7. **Computer vision / gesture input ("our own barehands")** — after the
-   dashboard shell exists. Webcam + hand-tracking (MediaPipe, called
-   directly — no barehands code copied) layered in as an additional input
-   source to the dashboard: gesture-triggered actions and, eventually, the
-   kind of reactive floating-card interaction barehands demonstrated.
-   barehands is treated purely as **design inspiration** — the actual
-   repo stays shelved (see planning notes below); nothing from it gets
-   copied or run. This is also what the dashboard's "Camera feed"
-   coming-soon tile is waiting on.
+7. **Computer vision / gesture input ("our own barehands")** — **in
+   progress.** First slice built: webcam feed + MediaPipe HandLandmarker
+   (called directly — no barehands code copied; used purely as design
+   inspiration, per the planning notes below) running in the dashboard's
+   new Camera card, detecting and drawing hand landmarks live. Deliberately
+   scoped to detection + visualization ONLY — gestures are not wired to
+   any action yet. See Status below for full detail and what's still
+   needed before gesture-triggered commands are safe to add.
 8. **Task orchestration / multi-step tool calling ("agentic" commands)** —
    not started. Current `intentRouter.ts` handles exactly one tool call
    per utterance (open app OR volume OR window) — it can't chain steps,
@@ -341,12 +340,83 @@ Summary of what changed:
   Milestone 10; the fixed-4-second recording window and named-window
   targeting are unrelated pre-existing limitations, not touched by this
   milestone.
-- **Still not fully confirmed on the user's machine** — the bugfix above
-  is typechecked/built clean in the sandbox the same way Milestone 6 was,
-  but (same limitation as always) hasn't been visually confirmed here.
-  Needs the user to re-run and confirm the pipeline/log/status/output now
-  actually update live, and that the orb visibly changes state (not just
-  idle-pulses) during a real voice or typed round-trip.
+- **Confirmed fixed on the user's machine** — pipeline/log/status/output
+  now update live, orb changes state correctly. Patched and committed.
+- **Second real-machine bug found and fixed, same session**: the System
+  Status card (hotkey/state/uptime) and the topbar hotkey label stayed
+  stuck on their initial placeholder text ("binding hotkey…", "Starting…")
+  forever, even though everything else now worked. Root cause: a genuine
+  race condition in `main.ts` — `send("proxy:ready", ...)` fired as soon
+  as `engine.init()` resolved, with no coordination with the renderer's
+  own page-load time. `webContents.send()` is fire-and-forget: if the
+  renderer's `ipcRenderer.on(...)` listener isn't attached yet, the
+  message is just dropped, no queue, no retry. `"ready"` is the one event
+  that fires seconds after launch — right as the page (module script +
+  ~2MB of vendored three.js) may still be loading — making it the one
+  most likely to race and lose. Every other event fires later, after the
+  user triggers something, by which point the page is long since loaded
+  — which is why only this one looked broken. Fixed by waiting for BOTH
+  `engine.init()` AND the renderer's own `did-finish-load` event before
+  sending anything (`Promise.all` in `main.ts`).
+- **Milestone 7 (CV) sprint, first slice**: webcam feed + MediaPipe
+  HandLandmarker in a new Camera card (center column, below the orb).
+  Inspired by barehands (see planning notes) but built from scratch —
+  MediaPipe called directly, no barehands code involved.
+  - **Scope, deliberately limited**: detect and draw hand landmarks live.
+    Nothing gesture-related is wired to any action yet — same reasoning
+    as Milestone 8's safety-pass note: a new trigger surface (gestures
+    controlling Proxy) gets its own design pass before it exists, not
+    bundled in with the capability that makes it possible.
+  - **Model file is a one-time manual download**, not automatic:
+    `hand_landmarker.task` (~7-9MB) is hosted on Google's model CDN, not
+    bundled in the `@mediapipe/tasks-vision` npm package, and this build
+    environment has no network access to fetch it. Same pattern already
+    established for the Piper voice model — `npm run setup:cv`
+    (`scripts/download-hand-model.js`) downloads it once to `models/`
+    (gitignored — regenerate via the script rather than committing it,
+    unlike the Piper voice files which the repo already commits; a
+    deliberate inconsistency, not an oversight, since nothing about this
+    file needs to be shared/versioned). `copy-assets.js` copies it into
+    `dist/` only if present, and warns (doesn't fail the build) if it's
+    missing — CV is additive, not required for the rest of the dashboard.
+  - **Vendored locally** (like three.js): `vision_bundle.mjs` (JS API)
+    plus only the SIMD WASM variant (`vision_wasm_internal.js/.wasm`,
+    ~12MB) — the package also ships nosimd and a third variant (~34MB
+    for all three combined), skipped because Electron's bundled Chromium
+    is always recent enough to support WASM SIMD; confirmed by reading
+    `FilesetResolver.forVisionTasks()`'s own source rather than assuming.
+  - **Error isolation, on purpose**: the MediaPipe module is
+    dynamic-imported inside `setupCameraAndHandTracking()`, not a
+    top-level static import like three.js. Direct lesson from the
+    preload channel-mismatch bug above — an uncaught failure at a
+    module's top level silently breaks every line after it in that same
+    module. If the webcam's unavailable, permissions are denied, or the
+    model file is missing, the failure is now caught and shown in the
+    Camera card's own status line; the orb/pipeline/log keep working
+    regardless.
+  - **Electron permission handling added**: `session.defaultSession
+    .setPermissionRequestHandler` now explicitly allowlists only
+    `"media"` (camera) and denies everything else — needed because
+    Electron denies permission requests by default on a `file://` origin,
+    so `getUserMedia()` would otherwise just hang/reject with no camera
+    ever appearing.
+  - **Coordinate mapping for the overlay**: the video uses `object-fit:
+    cover` (scaled+cropped to fill its frame), so landmark coordinates
+    (normalized against the *full* camera frame) need that same
+    scale+crop math applied or the skeleton overlay drifts from the
+    actual hand — implemented in `toCanvasMapper()` in `renderer.js`
+    rather than left as a "close enough" approximation.
+- **Not yet tested on the user's machine**: both the ready-event race fix
+  and the entire CV slice (camera permission prompt, WASM loading,
+  hand-tracking accuracy, coordinate-mapping correctness) are
+  typechecked/built clean here but have never run on a real webcam or a
+  real Windows permission dialog — this sandbox has neither. The
+  dynamic-import error isolation is untested for its actual purpose
+  (never seen a *real* failure to confirm it degrades gracefully rather
+  than just working by accident). Needs the user to run `npm run
+  setup:cv` once, then confirm: the hotkey/status labels populate on
+  launch, the camera permission prompt appears and works, and the hand
+  overlay actually tracks a real hand accurately.
 
 Known limitations (acceptable for now, on the roadmap to improve):
 - `sharp` (pulled in transitively by `@huggingface/transformers`, used for

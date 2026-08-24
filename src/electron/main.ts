@@ -27,6 +27,11 @@
  * engine, same "don't trust input blindly" instinct as the rest of the
  * project, just applied to our own UI instead of a third-party one.
  *
+ * A fourth job as of Milestone 7 (CV): allowlist the "media" permission
+ * (camera) so the dashboard's Camera card can call getUserMedia() at all
+ * — Electron denies permission requests by default for a file:// origin.
+ * See wireCameraPermission().
+ *
  * contextIsolation stays on and nodeIntegration stays off (Electron
  * security defaults) — the renderer only talks to Node/Electron through
  * the narrow, explicit channels exposed in preload.ts. Not because we
@@ -38,7 +43,7 @@
  */
 
 import "dotenv/config";
-import { app, BrowserWindow, globalShortcut, ipcMain } from "electron";
+import { app, BrowserWindow, globalShortcut, ipcMain, session } from "electron";
 import * as path from "path";
 import { ProxyEngine, RouteInfo } from "../core/engine";
 
@@ -77,6 +82,19 @@ function wireRendererCommands() {
   });
 }
 
+// Electron denies permission requests (camera/mic/etc.) by default for a
+// file:// origin — needed for the dashboard's Camera card (Milestone 7)
+// to call getUserMedia() at all. Allowlist ONLY "media" (camera/mic as a
+// combined permission in Electron's model — our own JS only ever
+// requests { video: true }, never audio, but Electron doesn't let us
+// split that finer here) and deny everything else explicitly, same
+// least-privilege instinct as the rest of this app's Electron config.
+function wireCameraPermission() {
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    callback(permission === "media");
+  });
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1180,
@@ -101,8 +119,21 @@ app.whenReady().then(async () => {
   createWindow();
   wireEngineEvents();
   wireRendererCommands();
+  wireCameraPermission();
 
-  await engine.init();
+  // Bug fixed here: this used to just `await engine.init()` and send
+  // "ready" immediately after. webContents.send() is fire-and-forget —
+  // if the renderer's ipcRenderer.on() listener isn't attached yet, the
+  // message is silently dropped, no queue, no retry. "ready" is the one
+  // event that fires seconds after launch, right as the page may still
+  // be loading (module script + ~2MB of vendored three.js to parse) —
+  // exactly the one most likely to race and lose. Now it waits for BOTH
+  // the engine and the actual page load before sending anything.
+  const pageLoaded = new Promise<void>((resolve) => {
+    mainWindow!.webContents.once("did-finish-load", () => resolve());
+  });
+  await Promise.all([engine.init(), pageLoaded]);
+
   send("proxy:ready", { hotkey: HOTKEY });
 
   const registered = globalShortcut.register(HOTKEY, () => {

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self';" />
   <title>Proxima</title>
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -94,6 +94,15 @@
         <span class="orb-title">PROXIMA CORE</span>
         <span class="orb-state" id="orbStateLabel">• IDLE</span>
       </div>
+
+      <div class="card camera-card">
+        <div class="card-title">CAMERA <span class="card-title-tag">Milestone 7 — hand tracking</span></div>
+        <div class="camera-frame">
+          <video id="cameraVideo" autoplay muted playsinline></video>
+          <canvas id="cameraOverlay"></canvas>
+        </div>
+        <div class="camera-status" id="cameraStatus">Starting camera…</div>
+      </div>
     </section>
 
     <!-- RIGHT COLUMN -->
@@ -117,10 +126,6 @@
       <div class="card">
         <div class="card-title">COMING SOON</div>
         <div class="soon-list">
-          <div class="soon-row">
-            <span class="soon-name">Camera feed</span>
-            <span class="soon-tag">Milestone 7 — Computer Vision</span>
-          </div>
           <div class="soon-row">
             <span class="soon-name">Connected devices</span>
             <span class="soon-tag">Not built yet</span>

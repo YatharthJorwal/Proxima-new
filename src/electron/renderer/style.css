@@ -305,7 +305,56 @@ body {
 
 .col-center {
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
+  padding-top: 8px;
+}
+
+.card-title-tag {
+  font-weight: 400;
+  letter-spacing: normal;
+  color: var(--ink-dim);
+  text-transform: none;
+  font-size: 10px;
+  margin-left: 4px;
+}
+
+.camera-card {
+  margin-top: 22px;
+  width: min(360px, 90%);
+}
+
+.camera-frame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  background: #000;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+}
+
+.camera-frame video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* Mirror the feed — feels natural for a self-facing webcam, matches
+     how you'd see yourself in a mirror rather than a recording. */
+  transform: scaleX(-1);
+}
+
+.camera-frame canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: scaleX(-1);
+}
+
+.camera-status {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--ink-dim);
+  text-align: center;
 }
 
 .orb-stage {
