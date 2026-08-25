@@ -63,7 +63,8 @@ function send(channel: string, payload?: unknown) {
 // out of sync with what the engine actually does.
 function wireEngineEvents() {
   engine.on("busy", () => send("proxy:busy"));
-  engine.on("listening", (seconds) => send("proxy:listening", seconds));
+  engine.on("listening", (info) => send("proxy:listening", info));
+  engine.on("speech-start", () => send("proxy:speech-start"));
   engine.on("transcribed", (text) => send("proxy:transcribed", text));
   engine.on("no-speech", () => send("proxy:no-speech"));
   engine.on("routed", (info: RouteInfo) => send("proxy:routed", info));

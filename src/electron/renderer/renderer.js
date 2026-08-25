@@ -283,15 +283,26 @@ window.proxy.on("ready", (payload) => {
   startedAt = Date.now();
 });
 
-window.proxy.on("listening", (seconds) => {
+window.proxy.on("listening", (info) => {
+  // Milestone 8 (VAD): there's no fixed recording length anymore, so
+  // there's nothing honest to count down. info.maxMs is only the hard
+  // safety cap — recording actually stops on silence, well before that
+  // in the normal case. See engine.ts's "listening" event docs.
   resetPipeline();
   statusDot.classList.add("active");
   statusDot.classList.remove("alarm");
   setOrbState("listening");
   beginStage("listening");
-  setStepSub("listening", `recording ${seconds}s of audio`);
-  appendLog("status", `listening for ${seconds}s...`);
+  setStepSub("listening", "waiting for you to speak…");
+  appendLog("status", `listening (auto-stops after a pause, max ${Math.round(info.maxMs / 1000)}s)`);
   outputBox.innerHTML = '<span class="output-empty">Listening…</span>';
+});
+
+window.proxy.on("speech-start", () => {
+  // Real signal, not decoration: this only fires once recorded energy
+  // actually crossed the VAD's speech threshold.
+  setStepSub("listening", "hearing you — pause when done");
+  appendLog("status", "hearing you...");
 });
 
 window.proxy.on("busy", () => {

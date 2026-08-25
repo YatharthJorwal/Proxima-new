@@ -146,20 +146,18 @@ reliability reasons — current trigger is a plain Enter keypress.
    rather than as its own bespoke integration.
    - **Pending UI tweak, not yet built**: move the Camera card to the
      bottom-left corner; leave the space below the orb clear for later.
-8. **Voice activity detection (VAD)** — next up, confirmed priority.
-   Right now every voice interaction records a fixed 4 seconds
-   (`RECORD_SECONDS` in `core/engine.ts`) regardless of how long you
-   actually talk — wastes time on short commands, cuts off long ones.
-   Replace with: start listening on hotkey press, detect when speech
-   actually starts, keep recording until a period of silence follows,
-   then auto-stop (with a sane max-duration safety cap). Plan is to try
-   a simple energy/amplitude-threshold approach first — no new ML model
-   or dependency — before reaching for something heavier like Silero
-   VAD, same "simplest thing that could work first" reasoning as the
-   browser-automation plan in Milestone 9. Fully independent of
-   Milestone 9 below — touches `audioUtils.ts`/`engine.ts`'s recording
-   step, not the routing/orchestration logic — so there's no ordering
-   requirement between them, VAD is just the smaller/faster win.
+8. ~~**Voice activity detection (VAD)**~~ — done, built and typechecked
+   in the sandbox; pending a real-machine test (see Status below).
+   Replaced the fixed 4-second recording window (`RECORD_SECONDS` in
+   `core/engine.ts`) with `recordUntilSilence()` in `audioUtils.ts`: start
+   listening on hotkey press, detect when speech actually starts, keep
+   recording until a period of silence follows, then auto-stop (with a
+   max-duration safety cap). Went with the planned simple
+   energy/amplitude-threshold approach — no new ML model or dependency —
+   rather than reaching for Silero VAD; see Status for the calibration
+   design and its one known edge case. Touched only `audioUtils.ts` and
+   `engine.ts`'s recording step, as planned — no changes to
+   routing/orchestration logic.
 9. **Task orchestration / multi-step tool calling ("agentic" commands)**
    — the big next architectural piece, confirmed priority. Current
    `intentRouter.ts` handles exactly one tool call per utterance (open
@@ -456,7 +454,84 @@ Summary of what changed:
   for later use. Small, isolated CSS/HTML change — not done yet since
   the user asked to pause building and plan the next milestone instead.
 
+**MILESTONE 8 (VAD) — built and typechecked in the sandbox, not yet
+tested on the user's machine** (same "sandbox has no audio device"
+caveat as every prior milestone that touches real hardware). Summary:
+- `audioUtils.ts`'s `recordSeconds(seconds)` replaced by
+  `recordUntilSilence(opts)`, returning `{ audio, speechDetected }`
+  instead of just a `Float32Array`. Three phases, energy/amplitude-
+  threshold only (no new ML model/dependency, per the original plan):
+  1. **Calibrate** — sample ~300ms of lead-in audio to estimate the
+     room's ambient noise floor, and derive a speech threshold from it
+     (`max(min(noiseFloor, ceiling) × 3, 0.02)`). These frames are kept
+     in the returned audio, not discarded, so a fast talker who starts
+     speaking immediately doesn't lose the start of their sentence.
+  2. **Wait for speech** — read frames until one crosses the threshold,
+     or give up after `PROXY_VAD_MAX_WAIT_MS` (default 6s) and report
+     `speechDetected: false`.
+  3. **Record until silence** — once speech starts, keep going until a
+     continuous quiet stretch lasts `PROXY_VAD_SILENCE_MS` (default
+     900ms), or `PROXY_VAD_MAX_MS` (default 15s) is hit regardless —
+     the safety cap in case the threshold misjudges this mic/room and
+     it never reads as "quiet."
+  - **One real edge case, handled deliberately**: if the user starts
+    talking during the ~300ms calibration window itself, that speech
+    energy would otherwise get counted as "ambient noise" and inflate
+    the threshold so high the rest of their sentence might never cross
+    it. Capped the noise-floor estimate at a ceiling (0.05) before
+    applying the ×3 multiplier — worst case, calibration degrades to a
+    fixed conservative threshold instead of a broken one. Not something
+    we can fully rule out without real-mic testing, which is why
+    `PROXY_VAD_THRESHOLD` exists as a manual override (see below) —
+    expected to stay unused unless real testing shows calibration
+    guessing wrong.
+  - New optional `.env` knobs (all have defaults, none required):
+    `PROXY_VAD_SILENCE_MS`, `PROXY_VAD_MAX_WAIT_MS`, `PROXY_VAD_MAX_MS`,
+    `PROXY_VAD_THRESHOLD` (fixed-threshold escape hatch, bypasses
+    calibration entirely when set) — documented in README.md. Read in
+    `engine.ts`, not `audioUtils.ts`, so that module stays a pure
+    options-in/result-out helper — same reasoning as `PROXY_HOTKEY`
+    living in `electron/main.ts` rather than inside the engine.
+  - **Real latency win, not just UX**: if nothing ever crosses the
+    speech threshold, `engine.ts` now skips the Whisper call entirely
+    and emits `no-speech` immediately, instead of always transcribing a
+    full clip regardless of whether anything was said. STT (CPU-only)
+    was already flagged as the main latency contributor — this cuts a
+    whole STT pass out of the "hit the hotkey, say nothing / say
+    something short" path.
+  - **Event contract changed, dashboard updated to match**: `listening`
+    used to carry a fixed `seconds` value the UI displayed as a
+    countdown ("recording 4s of audio") — no longer true once the
+    duration isn't fixed, so per the transparency principle this had to
+    change, not just get left stale. `listening` now carries only
+    `{ maxMs }` (the safety cap, real but secondary info), and a new
+    `speech-start` event fires the moment the VAD actually hears
+    speech. Updated in lockstep: `engine.ts` (event types),
+    `electron/main.ts` (IPC forwarding), `electron/preload.ts` (channel
+    allowlist), `electron/renderer/renderer.js` (Listening pipeline
+    step now reads "waiting for you to speak…" then "hearing you —
+    pause when done" instead of a duration countdown), and
+    `core/assistant.ts` (CLI logging). Deliberately did *not* add a new
+    orb visual state for "actively hearing speech" — the existing
+    `listening` orb state already covers the whole listening phase, and
+    a sub-state pulse would be visual polish, not something this
+    milestone's correctness depended on; can revisit if the user wants
+    it later.
+  - **`recordSeconds()` removed outright**, not left dead alongside the
+    new function — nothing else called it, and keeping an unused fixed-
+    duration path around risked exactly the kind of drift the
+    transparency principle is meant to prevent (a code path that no
+    longer matches what the UI claims is happening).
+
 Known limitations (acceptable for now, on the roadmap to improve):
+- VAD's calibration is a per-recording amplitude estimate, not a
+  persistent per-user profile — every hotkey press re-calibrates from
+  scratch against whatever's in the room in that ~300ms. Works fine for
+  a consistently quiet-ish room; a room with variable background noise
+  (TV, other people talking) may need `PROXY_VAD_THRESHOLD` set manually.
+  Untested against real background noise conditions — flag for the
+  user's first real-machine test alongside the usual audio-hardware
+  check.
 - `sharp` (pulled in transitively by `@huggingface/transformers`, used for
   image preprocessing) has a known `libvips` vulnerability with no fix
   currently available (per `npm audit`, checked at Milestone 6). Accepted
@@ -478,18 +553,18 @@ Known limitations (acceptable for now, on the roadmap to improve):
 - Volume control is relative only (nudges up/down, toggles mute) — no
   "set to X%" support.
 - Window control acts on whatever window is currently focused when the
-  script runs — because Proxy triggers via Enter-in-terminal, that's
-  usually the terminal itself unless the user Alt-Tabs to their target app
-  during the ~4 second recording window. Fully solved once a true global
-  hotkey exists (Electron phase).
+  script runs. Fully solved for the dashboard (Milestone 6's F9 global
+  hotkey doesn't require focusing anything). Still a real limitation for
+  the CLI-only path (`npm run start`, Enter-in-terminal trigger) — that
+  one still needs the user to Alt-Tab to their target app before/while
+  the recording window is open, whatever its length. Not worth fixing
+  the CLI path specifically now that the dashboard is the recommended
+  way to run Proxy day-to-day.
 - The regex command router still requires fairly exact phrasing for the
   zero-latency fast path; fuzzier phrasing now gets caught by the LLM
   router instead (Milestone 5) rather than falling through to plain
   command-unaware conversation, but that path is slower (an LLM round
   trip) than a regex hit.
-- Recording window is a fixed 4 seconds regardless of how long the user
-  actually talks — no longer just a noted limitation, now scheduled as
-  Milestone 8 (VAD), confirmed priority.
 
 Along the way: dropped Picovoice and node-global-key-listener (both
 antivirus/reliability issues) in favor of a simple Enter-key trigger. Fixed
@@ -512,14 +587,10 @@ setup file — did not proceed with it; see Milestone 6 planning notes.
    confirmed working. Detection + visualization only, by design — see
    Milestone list above for why gesture-to-action wiring was folded into
    Milestone 10 instead of built here directly.
-5. **Voice activity detection (VAD)** (Milestone 8) — next up, confirmed
-   priority. The recording-window latency issue flagged early on (fixed
-   4s regardless of actual speech length) — now explicitly scheduled
-   rather than just a noted limitation. Simple/independent enough to do
-   either just before or in parallel with Milestone 9; no ordering
-   dependency between them.
-6. **Task orchestration / multi-step tool calling** (Milestone 9) — the
-   big next architectural piece, confirmed priority. The clearest
+5. ~~**Voice activity detection (VAD)** (Milestone 8)~~ — done, built and
+   typechecked; pending a real-machine test. See Status below.
+6. **Task orchestration / multi-step tool calling** (Milestone 9) — next
+   up, the big next architectural piece, confirmed priority. The clearest
    capability gap right now: Proxy can only do one thing per utterance.
    This is what unlocks "open YouTube and search for X"-style commands.
    See Milestone list above for the planned approach (URL templating
@@ -556,8 +627,9 @@ core/                  (project root — user renamed this from "files/" after M
     core/               # trigger-agnostic engine, STT, TTS, LLM client
       assistant.ts      # CLI entry: Enter-key trigger + console logging of engine events
       engine.ts         # ProxyEngine (EventEmitter) — Milestone 6, shared by CLI + dashboard
-                         # RECORD_SECONDS fixed-4s constant here is what Milestone 8 (VAD) replaces
-      audioUtils.ts      # recordSeconds() — also where VAD's start/stop-on-silence logic will live
+                         # reads PROXY_VAD_* env knobs (Milestone 8) and wires them into audioUtils
+      audioUtils.ts      # recordUntilSilence() — Milestone 8 VAD (energy/amplitude threshold),
+                         # replaced the old fixed-4s recordSeconds()
       llm.ts            # askProxy (plain) + askProxyWithTools (Milestone 5)
       stt.ts
       tts.ts            # Piper (default) + optional ElevenLabs upgrade path, reviewed
@@ -593,6 +665,8 @@ core/                  (project root — user renamed this from "files/" after M
   package.json
   tsconfig.json
   .env                  # PIPER_EXE_PATH, PIPER_VOICE_PATH, optional PROXY_HOTKEY (default F9),
-                         # optional ELEVENLABS_API_KEY/ELEVENLABS_VOICE_ID
+                         # optional ELEVENLABS_API_KEY/ELEVENLABS_VOICE_ID, optional
+                         # PROXY_VAD_SILENCE_MS/PROXY_VAD_MAX_WAIT_MS/PROXY_VAD_MAX_MS/
+                         # PROXY_VAD_THRESHOLD (Milestone 8, all have defaults)
   CLAUDE.md              # this file
 ```

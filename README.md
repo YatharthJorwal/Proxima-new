@@ -47,6 +47,21 @@ PROXY_HOTKEY=F10
 # cost unless you set both.
 ELEVENLABS_API_KEY=...
 ELEVENLABS_VOICE_ID=...
+
+# Optional: tune voice activity detection (how long Proxy waits for you
+# to stop talking before it considers the command finished). Defaults
+# are listed below — only set these if the defaults feel wrong on your
+# mic/room (e.g. cutting you off mid-sentence, or hanging for a while
+# after you finish).
+PROXY_VAD_SILENCE_MS=900
+PROXY_VAD_MAX_WAIT_MS=6000
+PROXY_VAD_MAX_MS=15000
+
+# Optional: force a fixed speech-detection threshold (0.0-1.0 RMS)
+# instead of Proxy's automatic per-session calibration. Only needed if
+# calibration is guessing wrong for your specific mic — try without this
+# first.
+PROXY_VAD_THRESHOLD=
 ```
 
 ### 6. Install dependencies

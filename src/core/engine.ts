@@ -35,11 +35,22 @@
 import { EventEmitter } from "events";
 import { initSTT, transcribe } from "./stt";
 import { speak } from "./tts";
-import { recordSeconds } from "./audioUtils";
+import { recordUntilSilence } from "./audioUtils";
 import { tryHandleCommand, RegexCommandResult } from "../commands";
 import { handleWithIntent } from "../commands/intentRouter";
 
-const RECORD_SECONDS = 4;
+// Milestone 8 (VAD) tuning knobs — optional .env overrides, same pattern
+// as PROXY_HOTKEY in electron/main.ts. Read here rather than in
+// audioUtils.ts so that module stays a pure, independently-testable
+// helper (options in, result out) and engine.ts is the one place that
+// knows how Proxy is actually configured.
+const VAD_SILENCE_MS = Number(process.env.PROXY_VAD_SILENCE_MS) || 900;
+const VAD_MAX_WAIT_MS = Number(process.env.PROXY_VAD_MAX_WAIT_MS) || 6000;
+const VAD_MAX_RECORD_MS = Number(process.env.PROXY_VAD_MAX_MS) || 15000;
+// Unset by default (adaptive calibration is used instead) — only kicks in
+// if explicitly set, as an escape hatch for a mic/room where calibration
+// guesses wrong. See recordUntilSilence()'s docblock in audioUtils.ts.
+const VAD_FIXED_THRESHOLD = Number(process.env.PROXY_VAD_THRESHOLD) || undefined;
 
 // Discriminated union describing how a given utterance was ultimately
 // handled — this is the "which router handled it" info CLAUDE.md calls
@@ -51,7 +62,15 @@ export type RouteInfo =
 
 export interface EngineEvents {
   busy: () => void; // trigger fired while a previous request was still running
-  listening: (seconds: number) => void;
+  // Milestone 8: no fixed duration anymore, so there's no "seconds" to
+  // report up front — maxMs is the hard safety cap (recording stops
+  // regardless past this point), included so the UI can say something
+  // true ("auto-stops after Ns") instead of a countdown that would
+  // imply a duration Proxy isn't actually using.
+  listening: (info: { maxMs: number }) => void;
+  // Fires once, the moment the VAD actually hears speech (as opposed to
+  // just "recording started, still waiting for you to talk").
+  "speech-start": () => void;
   transcribed: (text: string) => void;
   "no-speech": () => void;
   routed: (info: RouteInfo) => void;
@@ -89,8 +108,23 @@ export class ProxyEngine extends EventEmitter {
     this.busy = true;
 
     try {
-      this.emit("listening", RECORD_SECONDS);
-      const audio = await recordSeconds(RECORD_SECONDS);
+      this.emit("listening", { maxMs: VAD_MAX_RECORD_MS });
+      const { audio, speechDetected } = await recordUntilSilence({
+        silenceHangMs: VAD_SILENCE_MS,
+        maxWaitForSpeechMs: VAD_MAX_WAIT_MS,
+        maxRecordMs: VAD_MAX_RECORD_MS,
+        fixedThreshold: VAD_FIXED_THRESHOLD,
+        onSpeechStart: () => this.emit("speech-start"),
+      });
+
+      // Nothing ever crossed the threshold — skip STT entirely rather
+      // than running a whisper pass over near-silence. This is a real
+      // latency win on top of VAD's main point (Whisper on CPU is the
+      // slowest stage in the pipeline — see Known limitations).
+      if (!speechDetected) {
+        this.emit("no-speech");
+        return;
+      }
 
       const text = await transcribe(audio);
 

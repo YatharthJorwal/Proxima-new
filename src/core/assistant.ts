@@ -34,7 +34,8 @@ function describeRoute(info: RouteInfo): string {
 }
 
 engine.on("busy", () => console.log("(still working on the last request, hang on)"));
-engine.on("listening", (seconds) => console.log(`\n>>> Listening for ${seconds}s...`));
+engine.on("listening", () => console.log("\n>>> Listening — say something (auto-stops after a pause)..."));
+engine.on("speech-start", () => console.log("(hearing you...)"));
 engine.on("transcribed", (text) => console.log(`You said: "${text}"`));
 engine.on("no-speech", () => console.log("(didn't catch anything)"));
 engine.on("routed", (info) => console.log(`Routed via: ${describeRoute(info)}`));

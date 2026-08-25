@@ -34,6 +34,7 @@ const CHANNELS = [
   "ready",
   "busy",
   "listening",
+  "speech-start",
   "transcribed",
   "no-speech",
   "routed",
