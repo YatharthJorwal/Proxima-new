@@ -318,10 +318,12 @@ body {
   margin-left: 4px;
 }
 
-.camera-card {
-  margin-top: 22px;
-  width: min(360px, 90%);
-}
+/* .camera-card intentionally has no width/margin override anymore — it's
+   now a plain left-column card (below OUTPUT), so it just stretches to
+   the column width like PIPELINE/INPUT/OUTPUT above it, spaced by
+   .col's own gap. Milestone 7 originally placed it under the orb in the
+   center column; moved per request to keep the space below the orb
+   clear. */
 
 .camera-frame {
   position: relative;
