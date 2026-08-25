@@ -134,19 +134,38 @@ reliability reasons — current trigger is a plain Enter keypress.
    committing to an Electron shell for other reasons — this fixes the
    window-control focus-timing limitation from Milestone 3 (see Known
    limitations) as a side effect.
-7. **Computer vision / gesture input ("our own barehands")** — **in
-   progress.** First slice built: webcam feed + MediaPipe HandLandmarker
-   (called directly — no barehands code copied; used purely as design
-   inspiration, per the planning notes below) running in the dashboard's
-   new Camera card, detecting and drawing hand landmarks live. Deliberately
-   scoped to detection + visualization ONLY — gestures are not wired to
-   any action yet. See Status below for full detail and what's still
-   needed before gesture-triggered commands are safe to add.
-8. **Task orchestration / multi-step tool calling ("agentic" commands)** —
-   not started. Current `intentRouter.ts` handles exactly one tool call
-   per utterance (open app OR volume OR window) — it can't chain steps,
-   so "open YouTube on Chrome and search for lo-fi beats" doesn't work:
-   that's two real actions (open/navigate, then search), not one.
+7. **Computer vision / gesture input ("our own barehands")** — **first
+   slice done, confirmed working on the user's machine.** Webcam feed +
+   MediaPipe HandLandmarker (called directly — no barehands code copied;
+   used purely as design inspiration, per the planning notes below)
+   running in the dashboard's Camera card, detecting and drawing hand
+   landmarks live. Deliberately scoped to detection + visualization
+   ONLY — gestures are not wired to any action. That wiring is now
+   explicitly folded into Milestone 10 below, to be built as a tool
+   within whatever orchestration framework Milestone 9 establishes,
+   rather than as its own bespoke integration.
+   - **Pending UI tweak, not yet built**: move the Camera card to the
+     bottom-left corner; leave the space below the orb clear for later.
+8. **Voice activity detection (VAD)** — next up, confirmed priority.
+   Right now every voice interaction records a fixed 4 seconds
+   (`RECORD_SECONDS` in `core/engine.ts`) regardless of how long you
+   actually talk — wastes time on short commands, cuts off long ones.
+   Replace with: start listening on hotkey press, detect when speech
+   actually starts, keep recording until a period of silence follows,
+   then auto-stop (with a sane max-duration safety cap). Plan is to try
+   a simple energy/amplitude-threshold approach first — no new ML model
+   or dependency — before reaching for something heavier like Silero
+   VAD, same "simplest thing that could work first" reasoning as the
+   browser-automation plan in Milestone 9. Fully independent of
+   Milestone 9 below — touches `audioUtils.ts`/`engine.ts`'s recording
+   step, not the routing/orchestration logic — so there's no ordering
+   requirement between them, VAD is just the smaller/faster win.
+9. **Task orchestration / multi-step tool calling ("agentic" commands)**
+   — the big next architectural piece, confirmed priority. Current
+   `intentRouter.ts` handles exactly one tool call per utterance (open
+   app OR volume OR window) — it can't chain steps, so "open YouTube on
+   Chrome and search for lo-fi beats" doesn't work: that's two real
+   actions (open/navigate, then search), not one.
    - **Orchestration layer**: a small loop on top of the existing router
      — LLM proposes a step, step executes, result feeds back to the LLM,
      repeat until it signals done or a safety cap is hit (small ReAct-
@@ -167,22 +186,42 @@ reliability reasons — current trigger is a plain Enter keypress.
      dashboard's Pipeline/Log — a 3-step task should be exactly as
      visible as a 1-step command already is, not a black box that just
      reports "done" at the end.
-9. **Maps / location awareness** — not started. Ties to the dashboard's
-   "Live map" coming-soon tile. Needs a real location source (Windows
-   Location API, or an IP-geolocation fallback if that's unreliable on
-   desktop) before any map rendering is worth building — no point
-   drawing a map with nothing real to plot on it.
-10. **Bluetooth / connected devices** — not started. Ties to the
+10. **Quality-of-life capabilities, built as orchestrator tools** — not
+    started, deliberately not scoped in detail yet. Covers four things
+    the user asked about together: gesture-to-action wiring (Milestone 7
+    follow-up), memory (Proxy remembering facts/preferences about the
+    user across sessions — distinct from the dashboard's session-log
+    persistence in Milestone 13 below, which is just the UI log
+    surviving a relaunch, not the LLM knowing anything), personality (a
+    real system-prompt/character pass for how Proxy talks), and more
+    complex consecutive/multi-step tasks beyond the browser-search
+    example. Explicitly NOT designed as four separate bespoke
+    integrations — per the user's own framing when this was discussed:
+    once Milestone 9 exists, each of these should mostly be "a couple
+    more tools" the orchestration loop can call (a `remember`/`recall`
+    tool for memory, a gesture recognized by the Camera card triggering
+    the same entry point a typed/spoken command would, etc.) rather than
+    hand-wired special cases. Real scoping happens after Milestone 9's
+    shape is concrete — planning further than that now would mean
+    designing against an architecture that doesn't exist yet.
+11. **Maps / location awareness** — not started. Ties to the dashboard's
+    "Live map" coming-soon tile. Needs a real location source (Windows
+    Location API, or an IP-geolocation fallback if that's unreliable on
+    desktop) before any map rendering is worth building — no point
+    drawing a map with nothing real to plot on it.
+12. **Bluetooth / connected devices** — not started. Ties to the
     dashboard's "Connected devices" coming-soon tile. Needs real device
     enumeration (Windows Bluetooth/WinRT APIs, likely via a native Node
     addon) to show actually-paired devices and battery levels — same
     rule as everywhere else in this project: real data or an honest
     empty state, never placeholder numbers.
-11. **Settings panel + persistent session history** — not started. Right
-    now all configuration is `.env`-only (hotkey, TTS provider, model
-    names) and the dashboard's session log resets on every relaunch.
-    A real settings UI and a persisted log (even just a local JSON/SQLite
-    file) would remove the last "everything resets" rough edge.
+13. **Settings panel + persistent dashboard session history** — not
+    started. Right now all configuration is `.env`-only (hotkey, TTS
+    provider, model names) and the dashboard's session log resets on
+    every relaunch. A real settings UI and a persisted log (even just a
+    local JSON/SQLite file) would remove the last "everything resets"
+    rough edge. Note: this is the dashboard's UI log persisting, not
+    Proxy remembering anything about the user — that's Milestone 10.
 
 ### Dashboard & CV planning notes
 **Reordering decision:** originally planned as CV (6) then Dashboard (7).
@@ -337,9 +376,9 @@ Summary of what changed:
   was permanent idle, which read as "breathing," not "spinning."
 - **Not yet done / explicitly deferred**: no persistent history across
   app restarts (log is in-memory, clears on relaunch) — tracked as
-  Milestone 10; the fixed-4-second recording window and named-window
-  targeting are unrelated pre-existing limitations, not touched by this
-  milestone.
+  Milestone 13; the fixed-4-second recording window (now Milestone 8,
+  VAD) and named-window targeting are unrelated pre-existing
+  limitations, not touched by this milestone.
 - **Confirmed fixed on the user's machine** — pipeline/log/status/output
   now update live, orb changes state correctly. Patched and committed.
 - **Second real-machine bug found and fixed, same session**: the System
@@ -364,9 +403,9 @@ Summary of what changed:
   MediaPipe called directly, no barehands code involved.
   - **Scope, deliberately limited**: detect and draw hand landmarks live.
     Nothing gesture-related is wired to any action yet — same reasoning
-    as Milestone 8's safety-pass note: a new trigger surface (gestures
-    controlling Proxy) gets its own design pass before it exists, not
-    bundled in with the capability that makes it possible.
+    as the orchestrator's safety-pass note (Milestone 9): a new trigger
+    surface (gestures controlling Proxy) gets its own design pass before
+    it exists, not bundled in with the capability that makes it possible.
   - **Model file is a one-time manual download**, not automatic:
     `hand_landmarker.task` (~7-9MB) is hosted on Google's model CDN, not
     bundled in the `@mediapipe/tasks-vision` npm package, and this build
@@ -406,17 +445,16 @@ Summary of what changed:
     scale+crop math applied or the skeleton overlay drifts from the
     actual hand — implemented in `toCanvasMapper()` in `renderer.js`
     rather than left as a "close enough" approximation.
-- **Not yet tested on the user's machine**: both the ready-event race fix
-  and the entire CV slice (camera permission prompt, WASM loading,
-  hand-tracking accuracy, coordinate-mapping correctness) are
-  typechecked/built clean here but have never run on a real webcam or a
-  real Windows permission dialog — this sandbox has neither. The
-  dynamic-import error isolation is untested for its actual purpose
-  (never seen a *real* failure to confirm it degrades gracefully rather
-  than just working by accident). Needs the user to run `npm run
-  setup:cv` once, then confirm: the hotkey/status labels populate on
-  launch, the camera permission prompt appears and works, and the hand
-  overlay actually tracks a real hand accurately.
+- **Confirmed working on the user's machine**: ready-event race fix
+  (hotkey/status labels now populate correctly on launch), camera
+  permission prompt, WASM loading, and hand-tracking are all live and
+  accurate — "hand tracking is great" per direct feedback. The
+  dynamic-import error isolation held up in practice too (no crash
+  cascade into the rest of the dashboard during setup/testing).
+- **Pending UI tweak, requested but not yet built**: move the Camera
+  card to the bottom-left corner; leave the space below the orb clear
+  for later use. Small, isolated CSS/HTML change — not done yet since
+  the user asked to pause building and plan the next milestone instead.
 
 Known limitations (acceptable for now, on the roadmap to improve):
 - `sharp` (pulled in transitively by `@huggingface/transformers`, used for
@@ -450,8 +488,8 @@ Known limitations (acceptable for now, on the roadmap to improve):
   command-unaware conversation, but that path is slower (an LLM round
   trip) than a regex hit.
 - Recording window is a fixed 4 seconds regardless of how long the user
-  actually talks — noted as a real contributor to perceived latency,
-  not yet addressed.
+  actually talks — no longer just a noted limitation, now scheduled as
+  Milestone 8 (VAD), confirmed priority.
 
 Along the way: dropped Picovoice and node-global-key-listener (both
 antivirus/reliability issues) in favor of a simple Enter-key trigger. Fixed
@@ -467,54 +505,66 @@ setup file — did not proceed with it; see Milestone 6 planning notes.
 2. ~~Voice quality~~ — resolved: Piper stays the zero-cost default; user
    added an optional ElevenLabs upgrade path to tts.ts himself (dormant
    unless an API key is set).
-3. ~~Performance tuning (STT)~~ — partially resolved: accuracy improved
-   (whisper-small.en), GPU acceleration blocked by a real library bug
-   (see Known limitations). Recording-window latency (fixed 4s) still
-   unaddressed — candidate for revisiting if it keeps bugging the user.
-4. ~~Dashboard — transparency-first UI (Electron)~~ — built (Milestone 6),
-   pending a real test on the user's machine. Delivered the true global
-   hotkey (F9, `globalShortcut`) as planned. See Status above.
-5. **Computer vision / gesture input ("our own barehands")** — after the
-   dashboard shell exists. MediaPipe called directly; barehands used as
-   design inspiration only, never as a dependency — see planning notes
-   above for why.
-6. **Task orchestration / multi-step tool calling** (Milestone 8) — not
-   started. The clearest capability gap right now: Proxy can only do one
-   thing per utterance. This is what unlocks "open YouTube and search for
-   X"-style commands. See Milestone list above for the planned approach
-   (URL templating before real browser automation, explicit step-cap +
-   confirmation-gate safety design, full dashboard visibility per step).
-7. **Maps / location awareness** (Milestone 9) and **Bluetooth / connected
-   devices** (Milestone 10) — both not started, both need a real data
-   source before any UI is worth building (see Milestone list above).
-   Priority between these two and CV isn't fixed — revisit based on what
-   actually turns out useful day-to-day.
-8. **Settings panel + persistent session history** (Milestone 11) — not
-   started, lower urgency than the above since `.env` config and an
-   in-memory log are working fine for now.
-9. **Later still**: plugin/skills system, absolute volume control,
-   named-window targeting. Also: the dashboard's "Project tracking"
-   coming-soon tile doesn't have a milestone behind it — unlike
-   maps/devices/settings, it's not clear yet what real data it would even
-   show for a personal desktop assistant (there's no existing
-   project-tracking concept in Proxy). Left as-is rather than inventing
-   scope just because the reference image had a slot for it; revisit only
-   if a concrete use for it comes up.
+3. ~~Dashboard — transparency-first UI (Electron)~~ — built (Milestone 6),
+   confirmed working on the user's machine. Delivered the true global
+   hotkey (F9, `globalShortcut`).
+4. ~~Computer vision / gesture input, first slice~~ — built (Milestone 7),
+   confirmed working. Detection + visualization only, by design — see
+   Milestone list above for why gesture-to-action wiring was folded into
+   Milestone 10 instead of built here directly.
+5. **Voice activity detection (VAD)** (Milestone 8) — next up, confirmed
+   priority. The recording-window latency issue flagged early on (fixed
+   4s regardless of actual speech length) — now explicitly scheduled
+   rather than just a noted limitation. Simple/independent enough to do
+   either just before or in parallel with Milestone 9; no ordering
+   dependency between them.
+6. **Task orchestration / multi-step tool calling** (Milestone 9) — the
+   big next architectural piece, confirmed priority. The clearest
+   capability gap right now: Proxy can only do one thing per utterance.
+   This is what unlocks "open YouTube and search for X"-style commands.
+   See Milestone list above for the planned approach (URL templating
+   before real browser automation, explicit step-cap + confirmation-gate
+   safety design, full dashboard visibility per step).
+7. **Quality-of-life capabilities** (Milestone 10) — gesture-to-action,
+   memory, personality, and more complex consecutive tasks, all
+   deliberately grouped and deliberately unscoped until Milestone 9
+   exists. Per the user's own reasoning when this was discussed: these
+   should mostly become "a couple more tools" the orchestrator can call,
+   not four separate integrations — so real design work on this waits
+   until there's an orchestrator to design against.
+8. **Maps / location awareness** (Milestone 11) and **Bluetooth /
+   connected devices** (Milestone 12) — both not started, both need a
+   real data source before any UI is worth building (see Milestone list
+   above). Priority among these and Milestone 10 isn't fixed — revisit
+   based on what actually turns out useful day-to-day.
+9. **Settings panel + persistent dashboard session history** (Milestone
+   13) — not started, lower urgency than the above since `.env` config
+   and an in-memory log are working fine for now.
+10. **Later still**: plugin/skills system, absolute volume control,
+    named-window targeting. Also: the dashboard's "Project tracking"
+    coming-soon tile doesn't have a milestone behind it — unlike
+    maps/devices/settings, it's not clear yet what real data it would
+    even show for a personal desktop assistant (there's no existing
+    project-tracking concept in Proxy). Left as-is rather than inventing
+    scope just because the reference image had a slot for it; revisit
+    only if a concrete use for it comes up.
 
 ## Project structure
 ```
-files/                 (project root, aka "Project Proxima" folder)
+core/                  (project root — user renamed this from "files/" after Milestone 7)
   src/
     core/               # trigger-agnostic engine, STT, TTS, LLM client
       assistant.ts      # CLI entry: Enter-key trigger + console logging of engine events
       engine.ts         # ProxyEngine (EventEmitter) — Milestone 6, shared by CLI + dashboard
-      audioUtils.ts
+                         # RECORD_SECONDS fixed-4s constant here is what Milestone 8 (VAD) replaces
+      audioUtils.ts      # recordSeconds() — also where VAD's start/stop-on-silence logic will live
       llm.ts            # askProxy (plain) + askProxyWithTools (Milestone 5)
       stt.ts
       tts.ts            # Piper (default) + optional ElevenLabs upgrade path, reviewed
     commands/           # hardcoded + LLM-routed PC-automation commands
       index.ts          # deterministic regex router (fast path); returns {handler, reply}
-      intentRouter.ts   # LLM tool-calling router; returns {reply, tool}
+      intentRouter.ts   # LLM tool-calling router; returns {reply, tool} — Milestone 9 (orchestrator)
+                         # is what turns this into a multi-step loop instead of one-shot
       types.ts          # shared CommandHandler type
       openApp.ts        # "open/launch/start X" + executeOpenApp()
       volume.ts         # volume up/down/mute + executeVolume()
@@ -522,19 +572,27 @@ files/                 (project root, aka "Project Proxima" folder)
     config/
       commands.json     # phrase -> executable path mapping for openApp.ts (~70 apps)
     electron/           # Milestone 6 — transparency-first dashboard
-      main.ts           # window creation, F9 global hotkey, forwards engine events over IPC
-      preload.ts         # narrow read-only contextBridge (proxy.on(channel, cb))
+      main.ts           # window creation, F9 global hotkey, IPC event forwarding, camera
+                         # permission allowlist (Milestone 7), ready-event race fix
+      preload.ts        # narrow contextBridge: proxy.on(channel, cb) read-only for events,
+                         # PLUS proxy.submitText(text) as the one write-path (dashboard Input box)
       renderer/          # plain HTML/CSS/JS dashboard UI, no framework
         index.html
         style.css
-        renderer.js
+        renderer.js      # includes Milestone 7's camera + MediaPipe HandLandmarker logic
+        vendor/          # generated by copy-assets.js at build time — three.js, MediaPipe
+                         # WASM runtime, and the downloaded hand-tracking model. Not in git.
     skills/             # higher-level "skills" built on top of commands (later)
   scripts/
-    copy-assets.js      # copies electron/renderer + config/commands.json into dist/ post-tsc
+    copy-assets.js         # copies electron/renderer + config/commands.json + vendored
+                            # three.js/MediaPipe (+ the hand-tracking model, if present) into dist/
+    download-hand-model.js # `npm run setup:cv` — one-time download of hand_landmarker.task
+  models/                # hand_landmarker.task lives here once downloaded — gitignored
   logs/                 # runtime logs
   voices/               # Piper voice model files (.onnx + .onnx.json)
   package.json
   tsconfig.json
-  .env                  # PIPER_EXE_PATH, PIPER_VOICE_PATH, optional PROXY_HOTKEY (default F9)
+  .env                  # PIPER_EXE_PATH, PIPER_VOICE_PATH, optional PROXY_HOTKEY (default F9),
+                         # optional ELEVENLABS_API_KEY/ELEVENLABS_VOICE_ID
   CLAUDE.md              # this file
 ```
