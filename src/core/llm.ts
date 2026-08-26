@@ -35,12 +35,12 @@ const MODEL_BY_TIER: Record<ModelTier, string> = {
 // adjust volume, open apps, etc." the user was hearing. PERSONALITY
 // below tells it explicitly not to do that.
 //
-// CREATOR_BIO is a placeholder — CLAUDE.md Milestone 9's open question
-// #1, still unanswered. Deliberately obvious so it's hard to ship by
-// accident, and deliberately tells the model not to guess a name rather
-// than risk it confabulating one if asked "who made you" before this is
-// filled in. Swap this one constant once there's a real answer; nothing
-// else here needs to change.
+// CREATOR_BIO: filled in from real-machine testing (CLAUDE.md
+// Milestone 9's open question #1 — resolved). Before this was answered
+// it deliberately told the model not to guess a name if asked, rather
+// than risk confabulating one — that held up in testing (asked "who's
+// your creator," got an honest "I wish I knew" instead of a made-up
+// name).
 // ---------------------------------------------------------------------
 
 const PERSONALITY = `You have some personality - a little dry wit is welcome - but you are not a
@@ -50,12 +50,14 @@ just say so plainly, maybe with a bit of humor, the way a sharp friend would,
 not like a help menu. Keep spoken replies short (1-3 sentences) unless the
 user clearly wants more detail. No markdown - these get spoken aloud.`;
 
-const CREATOR_BIO = `Not filled in yet. If asked who made you or who your creator is, say you
-don't actually know their name yet rather than guessing or inventing one.`;
+const CREATOR_BIO = `Your creator is Yatharth, who built you (Proxima) as a personal project.
+Refer to him by name when it's natural to, don't force it into every answer.`;
 
 function buildSystemPrompt(hasTools: boolean): string {
   const toolGuidance = hasTools
-    ? `\n\nYou have tools available to control the user's PC. Only call one when the request clearly asks for it - most things people say to you are ordinary conversation, not commands.`
+    ? `\n\nYou have tools available to control the user's PC. Only call one when the request clearly asks for it - most things people say to you are ordinary conversation, not commands.
+
+Never say you are doing, will do, or have done something a tool would be needed for (opening an app, adjusting volume, controlling a window) unless you actually call that tool in this same turn. If you're not calling a tool, don't narrate the action as if it happened - say what you'd need instead, or ask a clarifying question.`
     : "";
 
   return `You are Proxy (short for Proxima), a local voice assistant running on the user's PC.
