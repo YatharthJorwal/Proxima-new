@@ -13,10 +13,10 @@
  * special Windows targets.
  */
 
-import { spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import { CommandHandler } from "./types";
+import { launch } from "./launch";
 
 interface CommandsConfig {
   openApp: Record<string, string>;
@@ -45,25 +45,6 @@ const OPEN_PATTERN = /^(?:please\s+)?(?:open|launch|start)\s+(.+?)[.!?]?$/i;
 
 function normalize(name: string): string {
   return name.trim().toLowerCase();
-}
-
-function launch(target: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    // -WindowStyle Hidden keeps a PowerShell console window from flashing
-    // up on screen every time you open something.
-    const ps = spawn("powershell.exe", [
-      "-WindowStyle",
-      "Hidden",
-      "-Command",
-      `Start-Process "${target}"`,
-    ]);
-
-    ps.on("error", reject);
-    ps.on("close", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`Start-Process exited with code ${code}`));
-    });
-  });
 }
 
 /**

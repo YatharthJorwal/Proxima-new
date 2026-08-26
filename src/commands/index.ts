@@ -18,17 +18,20 @@ import { CommandHandler } from "./types";
 import { tryHandleOpenApp } from "./openApp";
 import { tryHandleVolume } from "./volume";
 import { tryHandleWindow } from "./window";
+import { tryHandleBrowse } from "./browse";
 
 export interface RegexCommandResult {
-  handler: "open-app" | "volume" | "window";
+  handler: "open-app" | "volume" | "window" | "browse";
   reply: string;
 }
 
-// Milestone 3 complete: open app, volume, window control.
+// Milestone 3 complete: open app, volume, window control. Milestone 9
+// added browse (URL templating for "search X for Y" requests).
 const handlers: { name: RegexCommandResult["handler"]; fn: CommandHandler }[] = [
   { name: "open-app", fn: tryHandleOpenApp },
   { name: "volume", fn: tryHandleVolume },
   { name: "window", fn: tryHandleWindow },
+  { name: "browse", fn: tryHandleBrowse },
 ];
 
 export async function tryHandleCommand(text: string): Promise<RegexCommandResult | null> {

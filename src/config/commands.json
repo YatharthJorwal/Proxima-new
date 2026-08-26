@@ -81,5 +81,13 @@
     "event viewer": "eventvwr.msc",
     "task scheduler": "taskschd.msc",
     "steps recorder": "psr.exe"
+  },
+  "browse": {
+    "youtube": "https://www.youtube.com/results?search_query={query}",
+    "google": "https://www.google.com/search?q={query}",
+    "github": "https://github.com/search?q={query}",
+    "wikipedia": "https://en.wikipedia.org/w/index.php?search={query}",
+    "amazon": "https://www.amazon.com/s?k={query}",
+    "reddit": "https://www.reddit.com/search/?q={query}"
   }
 }

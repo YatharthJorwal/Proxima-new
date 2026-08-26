@@ -17,6 +17,7 @@ import { Tool } from "ollama";
 import { executeOpenApp } from "./openApp";
 import { executeVolume, VolumeDirection } from "./volume";
 import { executeWindow, WindowAction } from "./window";
+import { executeBrowse, getBrowseSites } from "./browse";
 
 export interface ProxyTool {
   /** The LLM-facing schema — name, description, parameters. Sent to Ollama as-is. */
@@ -119,6 +120,34 @@ export const TOOLS: Record<string, ProxyTool> = {
     },
     execute: async (args) =>
       executeWindow(String(args.action ?? "").toLowerCase() as WindowAction),
+  },
+
+  browse: {
+    schema: {
+      type: "function",
+      function: {
+        name: "browse",
+        description:
+          "Open a website, optionally with a search query - e.g. 'search youtube for lo-fi beats' or just 'open google'. Builds the right URL directly (no browser automation), same fast path as a real search bar.",
+        parameters: {
+          type: "object",
+          properties: {
+            site: {
+              type: "string",
+              enum: getBrowseSites(),
+              description: "Which site to open.",
+            },
+            query: {
+              type: "string",
+              description: "What to search for on that site. Omit to just open the site's homepage.",
+            },
+          },
+          required: ["site"],
+        },
+      },
+    },
+    execute: async (args) =>
+      executeBrowse(String(args.site ?? ""), args.query ? String(args.query) : undefined),
   },
 };
 
