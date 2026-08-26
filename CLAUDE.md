@@ -159,16 +159,33 @@ reliability reasons — current trigger is a plain Enter keypress.
    `engine.ts`'s recording step, as planned — no changes to
    routing/orchestration logic.
 9. **Task orchestration / multi-step tool calling ("agentic" commands)**
-   — the big next architectural piece, confirmed priority. Current
-   `intentRouter.ts` handles exactly one tool call per utterance (open
-   app OR volume OR window) — it can't chain steps, so "open YouTube on
-   Chrome and search for lo-fi beats" doesn't work: that's two real
-   actions (open/navigate, then search), not one.
+   — the big next architectural piece, confirmed priority, currently in
+   the planning stage (see the full plan under Status below — this bullet
+   is the short version). Current `intentRouter.ts` handles exactly one
+   tool call per utterance (open app OR volume OR window) — it can't
+   chain steps, so "open notepad and snap it to the left" doesn't work:
+   `control_window` acts on whatever's focused, which only means
+   anything *after* `open_app` has actually finished.
    - **Orchestration layer**: a small loop on top of the existing router
      — LLM proposes a step, step executes, result feeds back to the LLM,
      repeat until it signals done or a safety cap is hit (small ReAct-
      style agent loop, not a rewrite of the existing single-shot router,
-     which stays as the fast path for simple one-step commands).
+     which stays as the fast path for exact-phrase commands).
+   - **Two-tier model routing, new since initial scoping**: rather than
+     one model for everything, turn 1 of every request goes to a small
+     fast model (no "thinking," e.g. `qwen3.5:4b`); the loop only
+     escalates to the existing `qwen3.5:9b` for turn 2+ if the request
+     actually turns out to need more steps. Simple utterances ("hello,"
+     "volume up") resolve in one fast-model call, same latency as
+     today; genuinely multi-step requests pay for the smarter model only
+     once that's demonstrated necessary. Full design + open questions
+     under Status.
+   - **Tool metadata, new**: tools get a `resultInformsNextStep` flag
+     (default false) — true only for a future "read/check" style tool
+     whose output the model would need to reason about before deciding
+     what's next. None of today's tools (open app, volume, window) need
+     it; it exists so the loop knows structurally when a result needs
+     reflection versus when a tool is just fire-and-forget.
    - **Browser/URL control, the practical fast path**: most "open X and
      search for Y" requests don't need real browser automation — they
      need the right URL. YouTube's `/results?search_query=`, Google's
@@ -179,29 +196,47 @@ reliability reasons — current trigger is a plain Enter keypress.
      asked of Proxy — no point taking on that complexity preemptively.
    - **New safety surface, worth its own design pass**: a multi-step loop
      can compound a wrong turn across several actions instead of one.
-     Needs a real step cap, likely a confirmation gate for anything that
-     isn't trivially reversible, and per-step visibility in the
-     dashboard's Pipeline/Log — a 3-step task should be exactly as
-     visible as a 1-step command already is, not a black box that just
-     reports "done" at the end.
+     Real step cap (`PROXY_ORCHESTRATOR_MAX_STEPS`, default 5), a
+     `requiresConfirmation` hook on the tool schema (built now, unused
+     for now — no current tool is destructive enough to need it; a
+     future tool can flip it on), and a minimal way to interrupt a
+     stuck/long-running loop (a second hotkey press or spoken "stop"
+     aborting the current orchestrator run) — added after reconciling
+     against an external architecture review, see Status. Per-step
+     visibility is now a dedicated dashboard component (the "Activity
+     panel," see Status) rather than a vague bullet point.
+   - **Personality baseline, pulled in from Milestone 10**: the user
+     flagged that Proxy's current replies feel flat/corporate (literally
+     parroting its own system-prompt tool description back — "I can
+     adjust volume, open apps," etc. — when it doesn't understand
+     something). Since `llm.ts`'s system prompt is being rewritten
+     anyway for the two-tier setup, a real personality pass (some wit,
+     not a support-bot tone) and a short static bio about the user (so
+     Proxy actually knows who its creator is) are happening as part of
+     Milestone 9, not deferred to 10. What stays in Milestone 10:
+     *dynamic* memory-driven personalization (referencing things Proxy
+     learned/remembered over time) — Milestone 9 only ships the fixed
+     baseline. See Status for the one open item this needs from the user
+     before the copy can be finalized.
 10. **Quality-of-life capabilities, built as orchestrator tools** — not
-    started, deliberately not scoped in detail yet. Covers four things
-    the user asked about together: gesture-to-action wiring (Milestone 7
-    follow-up), memory (Proxy remembering facts/preferences about the
-    user across sessions — distinct from the dashboard's session-log
-    persistence in Milestone 13 below, which is just the UI log
-    surviving a relaunch, not the LLM knowing anything), personality (a
-    real system-prompt/character pass for how Proxy talks), and more
-    complex consecutive/multi-step tasks beyond the browser-search
-    example. Explicitly NOT designed as four separate bespoke
-    integrations — per the user's own framing when this was discussed:
-    once Milestone 9 exists, each of these should mostly be "a couple
-    more tools" the orchestration loop can call (a `remember`/`recall`
-    tool for memory, a gesture recognized by the Camera card triggering
-    the same entry point a typed/spoken command would, etc.) rather than
-    hand-wired special cases. Real scoping happens after Milestone 9's
-    shape is concrete — planning further than that now would mean
-    designing against an architecture that doesn't exist yet.
+    started, deliberately not scoped in detail yet. Covers three things
+    (personality moved up into Milestone 9 as a static baseline — see
+    above; this is the dynamic layer on top): gesture-to-action wiring
+    (Milestone 7 follow-up), memory (Proxy remembering facts/preferences
+    about the user across sessions and referencing them naturally —
+    distinct from the dashboard's session-log persistence in Milestone
+    13 below, which is just the UI log surviving a relaunch, not the LLM
+    knowing anything), and more complex consecutive/multi-step tasks
+    beyond the browser-search example. Explicitly NOT designed as three
+    separate bespoke integrations — per the user's own framing when this
+    was discussed: once Milestone 9 exists, each of these should mostly
+    be "a couple more tools" the orchestration loop can call (a
+    `remember`/`recall` tool for memory, a gesture recognized by the
+    Camera card triggering the same entry point a typed/spoken command
+    would, etc.) rather than hand-wired special cases. Real scoping
+    happens after Milestone 9's shape is concrete — planning further
+    than that now would mean designing against an architecture that
+    doesn't exist yet.
 11. **Maps / location awareness** — not started. Ties to the dashboard's
     "Live map" coming-soon tile. Needs a real location source (Windows
     Location API, or an IP-geolocation fallback if that's unreliable on
@@ -449,14 +484,14 @@ Summary of what changed:
   accurate — "hand tracking is great" per direct feedback. The
   dynamic-import error isolation held up in practice too (no crash
   cascade into the rest of the dashboard during setup/testing).
-- **Pending UI tweak, requested but not yet built**: move the Camera
-  card to the bottom-left corner; leave the space below the orb clear
-  for later use. Small, isolated CSS/HTML change — not done yet since
-  the user asked to pause building and plan the next milestone instead.
+- **Camera card moved** to the bottom-left corner (below OUTPUT), per
+  request — patch delivered (`camera-card-move.patch`), applied and
+  built cleanly in clean-room verification. Pure layout move, same
+  element IDs, no JS changes needed. Not yet visually confirmed by the
+  user on their own screen.
 
-**MILESTONE 8 (VAD) — built and typechecked in the sandbox, not yet
-tested on the user's machine** (same "sandbox has no audio device"
-caveat as every prior milestone that touches real hardware). Summary:
+**MILESTONE 8 (VAD) — confirmed working on the user's real machine.**
+Summary:
 - `audioUtils.ts`'s `recordSeconds(seconds)` replaced by
   `recordUntilSilence(opts)`, returning `{ audio, speechDetected }`
   instead of just a `Float32Array`. Three phases, energy/amplitude-
@@ -523,15 +558,329 @@ caveat as every prior milestone that touches real hardware). Summary:
     transparency principle is meant to prevent (a code path that no
     longer matches what the UI claims is happening).
 
+**MILESTONE 9 (task orchestration) — PLAN, not yet built.** Full design
+doc, written up before touching code because this is the biggest
+architectural change so far and the user asked for a real plan first.
+Supersedes the shorter version in the Milestones list above (that entry
+is now just a summary pointing here).
+
+**1. The processing pipeline, end to end:**
+1. VAD (Milestone 8) captures the utterance, Whisper transcribes it.
+2. The regex fast path (`commands/index.ts`) checks for exact-phrase
+   matches first — completely unchanged by this milestone. Zero-latency,
+   no model call, stays the fastest path for things like "open notepad."
+3. If nothing matches, it goes to the orchestrator (new — replaces
+   today's one-shot `intentRouter.handleWithIntent`):
+   - **Turn 1 always goes to the fast model** (`qwen3.5:4b` — see model
+     tiering below) with the full tool list and the (rewritten)
+     personality system prompt. It either replies directly (plain chat —
+     "hello," questions, banter — done, one model call total), or calls
+     one or more tools it's confident it has everything it needs for
+     (today's tools are all "fire and forget," so a confident fast-model
+     call can execute and finish immediately — still one model call
+     total), or defers.
+   - **Deferring/escalating**: happens automatically if a tool result is
+     flagged `resultInformsNextStep` (structural — the loop just knows,
+     no model self-assessment needed), and as a fallback, the fast model
+     also gets a `defer_to_planner` tool it can call directly if a
+     request feels like it needs real multi-step reasoning it's not
+     confident planning in one shot. From that point on, the **smart
+     model** (`qwen3.5:9b`, already installed and confirmed working)
+     takes over: propose next tool, execute, feed the real result back,
+     repeat, until it stops calling tools or `PROXY_ORCHESTRATOR_MAX_STEPS`
+     (default 5) is hit. If the cap is hit before the model signals done,
+     Proxy says so honestly ("I've done a few things but want to check
+     in") instead of silently stopping or pretending it finished.
+4. Every step — which model handled it, which tool ran, what it
+   returned — gets its own dashboard event, same transparency bar as a
+   1-step command already has (no black-box "done" at the end of a
+   3-step task).
+5. Reply is spoken via TTS as before.
+
+**2. Model tiering, concretely:**
+- Fast tier: `qwen3.5:4b` (3.4GB) — pulled and confirmed present
+  (`ollama list` shows it). Smart tier: the already-installed
+  `qwen3.5:9b` (6.6GB), unchanged. Deliberately the *same model family*
+  as what's already proven working, not a different family — keeps
+  tool-call formatting/reliability consistent between tiers instead of
+  introducing a second set of unknowns. Other locally-available models
+  were weighed and rejected for this role: `gemma3:4b` has no native
+  tool-calling support in Ollama at any size (checked — this isn't a
+  config issue, Google didn't train the capability in); `phi4-mini` has
+  a tool-call template but multiple reports (including from Microsoft's
+  own team) of it needing a custom Modelfile binding before tool calls
+  reliably trigger; `qwen2.5:0.5b`/`1.5b` support tools but are smaller
+  and a generation older than `qwen3.5:4b` with no upside;
+  `gemma4:26b`/`qwen3:8b` are either too large for the VRAM budget or
+  superseded by what's already proven. `ministral-3:3b` is untested —
+  worth an empirical bake-off later, not a reason to hold up this plan.
+- **Why turn 1 is always the fast model, never a separate classifier
+  call**: a dedicated "is this simple or complex?" pre-step would tax
+  *every* request with an extra model call, including "hello" — the
+  exact case that's supposed to feel instant. Letting the fast model's
+  own first response double as the routing decision (reply / confident
+  tool call / defer) means the common case pays for exactly one call,
+  same as today.
+- **VRAM plan**: 6.6GB + 3.4GB = 10GB of the RTX 3060's 12GB, before KV
+  cache/context and whatever the dashboard's own GPU usage is (canvas
+  orb, Milestone 7's hand-tracking). That's workably close but not
+  something to assume blindly — v1 plan is to *not* force both models
+  to stay resident (no `keep_alive` pinning), just let Ollama's default
+  swap behavior handle it: the fast model stays warm since it's used on
+  every request, the smart model loads on demand for the (rarer)
+  escalated requests, paying a one-time load delay only then. If that
+  swap latency turns out annoying in real use, the fallback is
+  `qwen3.5:2b` (2.7GB) for the fast tier, giving more headroom to pin
+  both resident. Real answer comes from testing on the actual machine
+  (`ollama ps` / `nvidia-smi`), not from guessing further here.
+
+**3. "Thinking," made honest instead of decorative:** Ollama's chat API
+has a native `think` parameter (`true`/`false`/a level), and `qwen3.5`
+models support it — the response comes back with `message.thinking`
+(the actual reasoning trace) separate from `message.content` (the final
+answer). Plan: fast-tier calls use `think: false` (matches "doesn't
+overthink"); smart-tier calls use `think: true`. The dashboard shows
+this as a real, expandable "thinking" panel tied to the current
+step — not a fabricated "AI is thinking..." spinner, the model's actual
+reasoning trace, exactly what the transparency principle is meant to
+protect. Detail (streamed live vs. shown after the fact) gets decided
+when this is actually built.
+
+**4. Personality + creator baseline — the one thing blocking final
+copy:** diagnosed why replies currently feel flat: `llm.ts`'s
+`TOOL_SYSTEM_PROMPT` literally says "You have tools available to
+control the user's PC: opening apps, adjusting volume, and controlling
+the currently focused window" — when the model doesn't know what else
+to say, it's paraphrasing its own instructions back, which reads exactly
+like the canned "I can adjust volume, open this, etc." the user flagged.
+The Milestone 9 rewrite of `llm.ts` (needed anyway for two-tier calls)
+is where this gets fixed: real personality (some wit, plainly not a
+support-bot tone — per the user's own framing) plus a short static bio
+section so Proxy actually knows who its creator is. **Open item**:
+needs the user's name (or preferred form of address) and anything else
+they want baked in — that's not something to guess at. Actual system-
+prompt copy gets drafted once that's in hand. Dynamic,
+memory-driven personalization (referencing things Proxy *learns* over
+time, not just this fixed bio) stays Milestone 10 — this is the static
+baseline only.
+
+**5. Tool schema additions:**
+- `resultInformsNextStep?: boolean` (default false) — marks a tool
+  whose result the model needs to reason about before deciding what's
+  next (none of today's tools need this; it's forward-looking for
+  Milestone 10-era "check X" style tools).
+- `requiresConfirmation?: boolean` (default false) — the confirmation-
+  gate hook. Built now, unused now: nothing in the current tool set
+  (open app, volume, window, the new browse tool) is destructive enough
+  to need a "are you sure?" round trip. Exists so a future tool (delete
+  file, send email, whatever Milestone 10+ brings) can flip it on
+  without redesigning the loop. Deliberately *not* building the
+  interactive confirm-and-wait UX yet — no current consumer for it.
+- `defer_to_planner` — a lightweight tool exposed only to the fast-tier
+  model, its escape hatch for "this needs more thinking than I should
+  attempt."
+
+**6. External architecture review, reconciled against this plan:** the
+user brought a 20-point architecture review (independently written, not
+by us) for a gut check before finalizing. Went through it point by
+point against the actual code rather than taking it at face value —
+full reasoning lives in conversation history, this is the outcome:
+- **Already true, the review didn't know it**: the Pipeline/Log the
+  dashboard already has *is* the "observability panel" it proposed;
+  `RouteInfo` already covers most of a proposed `RouteDecision` type;
+  CLI and dashboard already share one `ProxyEngine`; TTS already proves
+  the "swappable provider" pattern works when actually needed.
+- **Already this plan, good independent confirmation**: its routing
+  hierarchy (regex → small model → escalate to big model) matches ours
+  closely — reassuring that an independent pass landed on the same
+  shape. Its own stated priority ("optimize for latency") also confirms
+  our call that the fast tier should execute directly when confident,
+  not just classify — a classify-only fast tier would force a second
+  model call even for "hello."
+- **Adopted, elevated to this milestone rather than deferred**:
+  *cancellation* — right now a trigger while `busy` is just dropped
+  silently; that's mildly annoying at today's ~1-4s latency and gets
+  worse once a single interaction can mean a multi-step loop plus a
+  "thinking" pass. Added a minimal interrupt to the safety-surface list
+  above. *A thin testing slice* — there are currently zero tests in the
+  repo, and the orchestrator's branching (step cap, escalation, defer,
+  multi-tool dispatch) is exactly the kind of logic that can't be
+  verified by typecheck+build alone, and can't be functionally verified
+  in the sandbox either (no mic/GPU/Ollama there). Mocked unit tests for
+  the loop's control flow are now part of the build order below — this
+  is the one thing that lets patches be verified as *correct*, not just
+  "compiles," before they're handed over.
+- **Real, good, correctly scoped for later (not blocking Milestone 9)**:
+  memory and session/task continuity are Milestone 10 as already
+  planned — the review's version is the same idea with sharper
+  vocabulary, not new scope. System tray / background runtime is a
+  confirmed real gap (checked `main.ts`: closing the dashboard window
+  currently calls `app.quit()` on Windows, killing the engine and
+  hotkey too) but it's its own project, not part of this one. Renderer
+  modularization is legitimate (`renderer.js` is ~2,000 lines and this
+  milestone adds more to it) but sequenced *after* this milestone's UI
+  work lands, not during — and without adopting a framework, which
+  would cut against this project's whole "boring and vanilla" stance.
+- **Rejected or explicitly held, because they cut against decisions
+  already made for real reasons**: a cloud-model escalation tier beyond
+  the local smart model — breaks the local-first premise the entire
+  project is built on, for a capability nothing asked-for actually
+  needs; not adopting this. Manually benchmarking alternate GGUF
+  quantization levels — premature optimization before the default-quant
+  two-tier setup has even been tried once, and slightly self-
+  contradicts the review's own "don't assume you need to requantize"
+  caveat two lines earlier. A full READ/WRITE/DANGEROUS permission
+  taxonomy with sandboxing/prompt-injection threat modeling — nothing in
+  the current or planned tool set is dangerous enough to justify this
+  yet; the `requiresConfirmation` boolean already in this plan is the
+  right-sized seed to grow from *when* a genuinely dangerous tool shows
+  up, not before. A generalized plugin SDK — the review flags this as
+  premature itself; agreed, no argument there.
+
+**7. Dashboard: the Activity panel (new UI component, replaces the old
+"per-step visibility in Pipeline/Log" bullet with an actual design):**
+the user's idea, refined a bit for the transparency principle. A
+compact card that lives beside the orb (center column, currently just
+orb-stage + orb-caption with empty space below) instead of only in the
+left-column Pipeline card:
+```
+┌──────────────────────────────┐
+│  PROXIMA ACTIVITY             │
+│                                │
+│  ● Listening                 ✓│
+│  ● Transcribing               ✓│
+│  ● Deciding                   ✓│
+│  ● Executing: open_chrome     ✓│
+│  ● Responding                 ●│
+│                                │
+│  ────────────────────────────  │
+│  “Chrome is open.”              │
+└──────────────────────────────┘
+```
+- **Rows are a live, growing list driven by real events — not a fixed
+  6-row template.** A one-shot chat reply ("hello") ends up 3-4 rows
+  (Listening → Transcribing → Deciding → Responding, no Executing row
+  at all — there was no tool). A multi-step escalated task grows an
+  `Executing: <toolname>` row *per loop iteration*, each with its own
+  real checkmark, because that's what's actually happening — a fixed
+  skeleton would either pad fake rows for a simple request or truncate
+  a real multi-step one, either way violating the transparency
+  principle rather than serving it.
+- **One deliberate change from the mockup**: collapsed "Understanding"
+  and "Selecting tools" into a single "Deciding" row. In the current
+  design both are the same one model call (the fast-tier model produces
+  a single decision — reply, or which tool(s) — in one shot); showing
+  them as two sequential rows would imply two separate observable
+  phases that don't actually exist yet. If the smart-tier loop later
+  gains a real distinct "figuring out what info it needs" phase, it can
+  earn its own row then — not before.
+- **Hidden at idle, appears the moment a turn starts** (on the same
+  `listening` event that already exists), so it costs zero space when
+  Proxy isn't doing anything — matches "doesn't eat much space."
+  Persists showing the finished checklist + response until the *next*
+  turn starts, rather than timer-based fade-out — simpler, and the
+  OUTPUT card already holds the same reply text as a permanent log, so
+  nothing is lost by not auto-hiding this one.
+- **Fun status words, scoped narrowly so they don't become dishonest
+  filler**: the "Triangulating / Sifting / Pondering / Booping /
+  Flibbertigibbeting" idea only replaces a row's label while that row is
+  in a *genuinely indeterminate* wait with nothing more specific to
+  report yet — in practice, that's just the "Deciding" row while the
+  model is mid-call. The moment there's real information (which tool is
+  executing, that a reply is ready), the row shows that real thing, not
+  a fun word — the checklist stays literal everywhere else. Tied to the
+  tier classification this milestone already builds: fast-tier
+  decisions are usually near-instant, so "Deciding" just shows once,
+  plainly, no point animating something that resolves in a few hundred
+  ms; smart-tier escalations genuinely take a few seconds, which is
+  where a rotating word (cycling for exactly as long as the real call is
+  in flight, not a fixed animation length) actually helps the wait feel
+  alive instead of frozen — same reasoning as why VAD's "hearing you"
+  text mattered in Milestone 8. Final word list gets written alongside
+  the personality/system-prompt copy in item 4 above, not separately —
+  word choice is a personality decision, not an independent one, so
+  they should land together once the creator/tone open item is
+  answered.
+- **Open call, not yet decided**: does this panel *replace* the
+  existing left-column Pipeline card, or do both coexist? Default plan
+  is to replace it — the Activity panel does everything Pipeline did
+  and more, in a more prominent spot, and keeping both risks showing the
+  same information twice in two places, which is its own kind of
+  clutter. Left column simplifies to Input / Output / Camera. Easy to
+  revert if it turns out the persistent left-column version is missed
+  once this is live.
+- **New engine events this needs** (none exist yet except where noted):
+  `transcribing` (start — currently the gap between recording-stop and
+  the existing `transcribed` event is silent, so this is also a small
+  honesty fix in its own right, not just new UI plumbing), `deciding`
+  (start; end is implicit when the model responds), `tool-start` /
+  `tool-result` (per loop iteration, carries the real tool name),
+  `responding` (start; end is the existing `reply` event).
+
+**8. Build order** (renumbered/expanded from the original plan):
+1. `llm.ts` rewrite — two-tier model calls (`think` param wired
+   correctly per tier), new system prompt structure (mechanical
+   plumbing can be built with a placeholder bio, finalized once the
+   open item above is answered).
+2. `commands/tools.ts` — pure refactor, pulls the tool schemas + dispatch
+   switch out of `intentRouter.ts` into a shared module (no behavior
+   change), adds the new schema fields above.
+3. `browse` tool + a `browse` section in `commands.json` (URL templates,
+   same config-driven pattern as `openApp`) — factors the `Start-Process`
+   launcher out of `openApp.ts` so both share it.
+4. `orchestrator.ts` — the actual loop: tiering/escalation, step cap,
+   `defer_to_planner`, thinking-trace pass-through, the new
+   `transcribing`/`deciding`/`tool-start`/`tool-result`/`responding`
+   events, and a minimal cancellation path (abort the loop on a repeat
+   trigger or spoken "stop").
+5. A thin slice of orchestrator unit tests — mocked LLM responses and
+   mocked tools, exercising step-cap, escalation, and defer logic
+   without needing real Ollama/hardware. New to this project; scoped
+   deliberately small (the loop's control flow, not an exhaustive
+   suite) so it doesn't become its own milestone.
+6. Wire into `engine.ts` (replaces the `intentRouter` call) + the new
+   Activity panel component in the dashboard (replacing the old Pipeline
+   card, per the default above), tier indicator, thinking panel.
+7. Test with concrete cases: "hello" (fast tier, 1 call, 3-4 Activity
+   rows, no thinking panel), "open notepad and snap it to the left"
+   (exercises the loop even with today's action-only tools — first real
+   test of whether the fast model handles this in one confident
+   multi-tool-call turn or needs to defer), "who made you" (personality
+   + creator bio).
+
+**9. Open questions (need the user's input or real-machine testing,
+not guesses):**
+- Creator identity/personality copy — name + anything else Proxy should
+  know, and how much wit is "right" (will draft a first pass and adjust
+  from feedback rather than trying to nail it blind). The Activity
+  panel's fun-word list is tied to this same answer, not separate.
+- Whether the Activity panel should fully replace the left-column
+  Pipeline card (default: yes, see item 7) — easy to revert.
+- VRAM co-residency of `qwen3.5:9b` + `qwen3.5:4b` in practice,
+  especially with Milestone 7's camera/hand-tracking also active —
+  validate via `ollama ps`/`nvidia-smi` once built; `qwen3.5:2b` is the
+  documented fallback if it's tight.
+- Whether the fast model reliably recognizes when to call
+  `defer_to_planner` vs. confidently guessing wrong on a genuinely
+  multi-step request — small models are weaker at self-assessment; the
+  structural `resultInformsNextStep` rule is the safety net that doesn't
+  depend on the model getting this right, but real testing will show how
+  often the escape hatch is actually needed.
+- Whether a single fast-tier turn can reliably propose multiple
+  independent tool calls at once (an optimization — collapsing "open
+  notepad and snap it left" into one model call instead of a loop
+  iteration). Worth trying, not load-bearing: the classic loop
+  (execute → feed result back → ask again) is the robust fallback either
+  way.
+
 Known limitations (acceptable for now, on the roadmap to improve):
 - VAD's calibration is a per-recording amplitude estimate, not a
   persistent per-user profile — every hotkey press re-calibrates from
-  scratch against whatever's in the room in that ~300ms. Works fine for
-  a consistently quiet-ish room; a room with variable background noise
-  (TV, other people talking) may need `PROXY_VAD_THRESHOLD` set manually.
-  Untested against real background noise conditions — flag for the
-  user's first real-machine test alongside the usual audio-hardware
-  check.
+  scratch against whatever's in the room in that ~300ms. Confirmed
+  working on the user's machine under normal conditions; still untested
+  against a room with variable background noise (TV, other people
+  talking), which may need `PROXY_VAD_THRESHOLD` set manually if it
+  comes up.
 - `sharp` (pulled in transitively by `@huggingface/transformers`, used for
   image preprocessing) has a known `libvips` vulnerability with no fix
   currently available (per `npm audit`, checked at Milestone 6). Accepted
@@ -587,22 +936,22 @@ setup file — did not proceed with it; see Milestone 6 planning notes.
    confirmed working. Detection + visualization only, by design — see
    Milestone list above for why gesture-to-action wiring was folded into
    Milestone 10 instead of built here directly.
-5. ~~**Voice activity detection (VAD)** (Milestone 8)~~ — done, built and
-   typechecked; pending a real-machine test. See Status below.
+5. ~~**Voice activity detection (VAD)** (Milestone 8)~~ — done, confirmed
+   working on the user's real machine. See Status below.
 6. **Task orchestration / multi-step tool calling** (Milestone 9) — next
-   up, the big next architectural piece, confirmed priority. The clearest
-   capability gap right now: Proxy can only do one thing per utterance.
-   This is what unlocks "open YouTube and search for X"-style commands.
-   See Milestone list above for the planned approach (URL templating
-   before real browser automation, explicit step-cap + confirmation-gate
-   safety design, full dashboard visibility per step).
+   up, the big next architectural piece, confirmed priority, currently
+   being planned (full design doc under Status). Unlocks both real
+   multi-step commands and a two-tier fast/smart model setup, plus a
+   personality baseline fix pulled forward from Milestone 10.
 7. **Quality-of-life capabilities** (Milestone 10) — gesture-to-action,
-   memory, personality, and more complex consecutive tasks, all
-   deliberately grouped and deliberately unscoped until Milestone 9
-   exists. Per the user's own reasoning when this was discussed: these
-   should mostly become "a couple more tools" the orchestrator can call,
-   not four separate integrations — so real design work on this waits
-   until there's an orchestrator to design against.
+   memory, and more complex consecutive tasks, deliberately grouped and
+   deliberately unscoped until Milestone 9 exists (personality moved to
+   Milestone 9 as a static baseline; Milestone 10 adds the
+   memory-driven dynamic layer on top). Per the user's own reasoning
+   when this was discussed: these should mostly become "a couple more
+   tools" the orchestrator can call, not separate integrations — so real
+   design work on this waits until there's an orchestrator to design
+   against.
 8. **Maps / location awareness** (Milestone 11) and **Bluetooth /
    connected devices** (Milestone 12) — both not started, both need a
    real data source before any UI is worth building (see Milestone list
