@@ -1179,13 +1179,25 @@ core/                  (project root — user renamed this from "files/" after M
                          # reads PROXY_VAD_* env knobs (Milestone 8) and wires them into audioUtils
       audioUtils.ts      # recordUntilSilence() — Milestone 8 VAD (energy/amplitude threshold),
                          # replaced the old fixed-4s recordSeconds()
-      llm.ts            # askProxy (plain) + askProxyWithTools (Milestone 5)
+      llm.ts            # chat() — Milestone 9 two-tier model calls (fast/smart, tiered `think`);
+                         # askProxy/askProxyWithTools kept as back-compat wrappers around it
       stt.ts
       tts.ts            # Piper (default) + optional ElevenLabs upgrade path, reviewed
     commands/           # hardcoded + LLM-routed PC-automation commands
       index.ts          # deterministic regex router (fast path); returns {handler, reply}
-      intentRouter.ts   # LLM tool-calling router; returns {reply, tool} — Milestone 9 (orchestrator)
-                         # is what turns this into a multi-step loop instead of one-shot
+      intentRouter.ts   # single-shot LLM tool-calling router (Milestone 5); returns {reply, tool}.
+                         # Still what engine.ts calls today — orchestrator.ts replaces this call
+                         # at build order step 6, not this one.
+      orchestrator.ts    # Milestone 9 build order step 4 — the actual multi-step loop (two-tier
+                         # escalation, step cap, defer_to_planner, cancellation). Standalone so
+                         # far, not yet wired into engine.ts.
+      tools.ts           # Milestone 9 step 2 — shared tool registry (schemas + dispatch), pulled
+                         # out of intentRouter.ts so it and orchestrator.ts share one definition
+                         # per tool instead of two copies.
+      browse.ts           # Milestone 9 step 3 — "open/search site" via URL templating, no browser
+                         # automation. Site -> URL map lives in config/commands.json's "browse" section.
+      launch.ts           # shared Start-Process launcher, factored out of openApp.ts so browse.ts
+                         # can reuse it.
       types.ts          # shared CommandHandler type
       openApp.ts        # "open/launch/start X" + executeOpenApp()
       volume.ts         # volume up/down/mute + executeVolume()
