@@ -256,6 +256,26 @@ reliability reasons — current trigger is a plain Enter keypress.
     rough edge. Note: this is the dashboard's UI log persisting, not
     Proxy remembering anything about the user — that's Milestone 10.
 
+14. **Dashboard visual refresh** — not started, planning stage (full
+    design under Status below). Triggered by the user sharing a
+    reference image and a written wishlist. Worth noting: the *palette*
+    this reference image inspired is already in `style.css` (see that
+    file's own header comment — Milestone 6 already pinned this
+    direction) — this milestone is about pushing the *execution* further
+    toward the reference's polish/contrast/liveliness, plus several
+    concrete, independently-scoped UI fixes and additions, not a new
+    direction.
+
+15. **STT upgrade: Distil-Large-v3.5 + real GPU acceleration** — not
+    started, investigation done, decision pending the user's go-ahead
+    (full findings under Status below). User asked to switch off
+    Whisper-small onto Distil-Large-v3.5 and move STT from CPU onto the
+    GPU. Investigation found the current library
+    (`@huggingface/transformers`) cannot do the GPU part on Windows at
+    all — verified directly from its own source, not assumed — which
+    reframes this from "swap a model string" into "swap the STT
+    dependency," a real architecture decision, not a quick patch.
+
 ### Dashboard & CV planning notes
 **Reordering decision:** originally planned as CV (6) then Dashboard (7).
 Swapped after discussing scope with the user. Reasoning: the dashboard
@@ -890,7 +910,7 @@ Known limitations (acceptable for now, on the roadmap to improve):
 - STT runs on CPU. GPU (DirectML) was attempted and genuinely doesn't work
   for this model/library combo right now — see stack table. whisper-small.en
   on CPU is the current tradeoff (better accuracy than base.en, at
-  CPU-only speed).
+  CPU-only speed). Milestone 15 investigates a real fix (see Status).
 - STT still occasionally mishears words, though less than under base.en —
   not something we've specifically re-tested since the model upgrade.
 - Piper's voice is robotic/synthetic. tts.ts now also supports ElevenLabs as
@@ -914,6 +934,24 @@ Known limitations (acceptable for now, on the roadmap to improve):
   router instead (Milestone 5) rather than falling through to plain
   command-unaware conversation, but that path is slower (an LLM round
   trip) than a regex hit.
+- **Found in real-machine testing, Milestone 9 step 3**: bare "open
+  youtube" / "open github" (no explicit browser mentioned) often gets
+  ignored rather than routed to the new `browse` tool — but only when
+  Chrome isn't named explicitly alongside it. Verified this is *not* a
+  bug in `browse.ts` itself — its URL-building logic has a passing unit
+  check, and the tool schema's description already covers bare "open X"
+  phrasing as an example. This is the same underlying issue as the
+  hallucination bug fixed in Milestone 9 step 1b: a single one-shot
+  smart-tier call isn't perfectly reliable at picking the right tool for
+  every phrasing. Expected to keep improving as the rest of Milestone 9
+  (the real orchestrator, better-structured tool selection) lands — not
+  something worth chasing with more prompt patches in the meantime.
+- **Found in real-machine testing**: if the user types into the INPUT box
+  and hits send while Proxy is still busy on a previous request, the
+  typed text currently disappears rather than being preserved. It should
+  stay in the box so it can be sent once Proxy frees up, without
+  interrupting whatever Proxy is currently doing. Queued for Milestone 14
+  (dashboard visual refresh) — see Status.
 
 Along the way: dropped Picovoice and node-global-key-listener (both
 antivirus/reliability issues) in favor of a simple Enter-key trigger. Fixed
@@ -923,6 +961,160 @@ running 100% on GPU — it was never the latency bottleneck; STT (CPU-only)
 and the fixed 4s recording window are the real contributors. Investigated
 `barehands` for Milestone 6 and found a prompt-injection pattern in its
 setup file — did not proceed with it; see Milestone 6 planning notes.
+
+**MILESTONE 14 (dashboard visual refresh) — PLAN, not yet built.**
+Triggered by the user sharing a reference image (a polished "Proxima"
+dashboard concept render) plus a written wishlist. Conversation-only pass
+— written up here before any code, same discipline as Milestone 9's plan.
+
+- **Context worth restating**: `style.css`'s own header comment already
+  says the current navy/cyan/card palette was pinned by this same
+  reference image back at Milestone 6. This round isn't a new direction —
+  it's pushing execution further toward the reference's polish, contrast,
+  and "aliveness," plus a batch of concrete, independently-scoped fixes.
+- **Sidebar**: collapses to just a "Dashboard" nav item plus a hamburger
+  toggle above it to open/close the sidebar — nothing else yet. The
+  reference's other nav items (Memory, Tools, Devices, Maps, Settings,
+  etc.) are real *future* destinations the user described concretely, not
+  decoration to fake now:
+  - **Dashboard** — current view, everything.
+  - **Chat interface** — orb + input + output only, a focused view.
+  - **Memory** — session log + a summary (ties to Milestone 10's memory
+    work, once that exists).
+  - **Tools** — a list of what Proxy can actually do (ties to the tool
+    registry from Milestone 9 step 2 — this view could just render
+    `commands/tools.ts`'s registry, which already has descriptions).
+  - **Maps** — full-area map (Milestone 11).
+  - Devices ties to Milestone 12, Settings to Milestone 13.
+  None of these get built now — just the nav rail + toggle, so the
+  *shape* is there without faking functionality behind it.
+- **Activity panel** (designed in Milestone 9's plan, not yet built):
+  refined, not replaced. The reference's labels ("Analyzing Input,"
+  "Retrieving Knowledge," "Generating Hypotheses," etc.) with real
+  per-step timers are worth adopting for flavor — but every row still has
+  to map to something that actually happened, at the time it actually
+  finished, same as before. Concretely: keep the "Deciding"/"Executing:
+  toolname" row *content and timing rules* exactly as already designed,
+  just give the row labels more character where that's honest (e.g. a
+  "Deciding" row becoming "Analyzing Input" is fine — same real event,
+  friendlier name; inventing a row for a phase that doesn't exist is
+  not). Timers shown per row are real elapsed time for that step, not
+  decorative numbers.
+- **Orb**: no change in direction, just flagging it's correctly *not* a
+  literal copy of the reference — `style.css`'s comment already documents
+  this as deliberate (the reference's orb is a static illustration; ours
+  is event-driven, which is the more valuable property to keep).
+- **Input box**: add a mic icon inside the box itself, same trigger as
+  F9 — currently that's hotkey-only, no in-UI equivalent.
+- **Real bug fix, found in testing**: typed text currently disappears if
+  you hit send while Proxy is still busy on a previous request. Should
+  stay in the box (so it can be sent once Proxy is free) without
+  interrupting the in-flight request — right now it just vanishes.
+- **Output / session log**: shorten for now — a compact placeholder-style
+  card, since the full detailed log view is what the future "Memory" nav
+  destination is for, not something the main dashboard needs to carry in
+  full.
+- **Camera card**: drop the "Milestone 7 — hand tracking" tag, just
+  "CAMERA" — more capabilities are coming to this card later, and the tag
+  makes it read as hand-tracking-specific.
+- **New placeholder cards** (Neural Network graph, Activity chart —
+  "looks hella cool," the user's words): styled to match the reference's
+  aesthetic, but — important departure from the reference itself — kept
+  *honest* rather than populated with realistic-looking fake data. The
+  reference shows a fabricated mouse battery %, a fake GPS location, fake
+  project progress bars — fine for a marketing render, not fine for an
+  app that's supposed to show what's actually happening. The dashboard
+  already has the right instinct for this: the existing "COMING SOON"
+  card plainly tags "Connected devices" / "Live map" / "Project tracking"
+  as "Not built yet" rather than faking them. Extend that exact pattern
+  to the new cards rather than inventing a fake-data version. Also worth
+  naming honestly: a literal "neural network" visualization of an LLM's
+  internals isn't something we can show truthfully (there's no real
+  signal to visualize) — this card is decorative sci-fi flavor, not a
+  data view, and should probably be framed that way rather than implying
+  it represents something real.
+- **TTS playback**: "can be made better" — real but loosely specified.
+  Needs a proper design pass once we get here (something like a waveform
+  or a speaking-state indicator is the likely direction) rather than
+  guessing at a full spec from one sentence.
+- Not scoped yet, deliberately: actually building any of the future nav
+  destinations (Chat/Memory/Tools/Maps/Settings views) — this milestone
+  is the shell (sidebar + placeholders + the fixes above) only.
+
+**MILESTONE 15 (STT upgrade: Distil-Large-v3.5 + GPU) — investigation
+done, decision pending the user, not yet built.** User asked to switch
+from `whisper-small.en` to Distil-Large-v3.5 and move STT off CPU onto
+the GPU (RTX 3060, currently idle for STT). Both halves investigated
+properly rather than assumed — see conversation history for full
+searches — outcome:
+
+- **The model swap alone is real and easy**: `distil-whisper/distil-
+  large-v3.5-ONNX` exists, and its usage example is a literal drop-in for
+  the existing `pipeline()` call in `stt.ts` — same API, different model
+  string.
+- **CUDA is not available on this stack on Windows — verified from the
+  installed library's own source, not assumed.** `@huggingface/
+  transformers` v3.8.1 (the actual installed version) has this literal
+  compatibility table in its bundled code: CUDA is only ✔️ on Linux x64;
+  Windows only ever gets DirectML or CPU. Requesting `device: "cuda"` on
+  Windows throws `Unsupported device` immediately — not a graceful
+  fallback, a hard platform wall.
+- **DirectML — the only GPU option this library offers on Windows — is
+  the same thing already tried and reverted** (see the stack table
+  elsewhere in this doc): a reproducible bug in Whisper's autoregressive
+  decode loop. That bug is architectural (any Whisper-shaped model has
+  the same decode-loop structure), so retrying it with Distil-Large-v3.5
+  would very likely hit the identical wall — not attempted, since we
+  already have the diagnosis and repeating a known-failed experiment
+  isn't a good use of anyone's time.
+- **The accuracy trade, as best it can be quantified honestly**: no
+  single authoritative source directly compares whisper-small to
+  Distil-Large-v3.5 (Distil-Whisper's own benchmarks only compare against
+  full Whisper-large variants, since that's its distillation target).
+  What's solid: Distil-Large-v3.5 performs within about 1% WER of
+  Whisper large-v3 on out-of-distribution audio. Whisper's own published
+  benchmarks put small.en's realistic-world error rate meaningfully
+  higher than large's (roughly double, on the more realistic multi-
+  dataset benchmarks OpenAI itself used, versus a much smaller gap on
+  clean audiobook-quality speech specifically). So: a real accuracy
+  upgrade, plausibly cutting the error rate roughly in half in realistic
+  conditions, though "roughly in half" is a reasoned estimate from the
+  numbers that do exist, not a number anyone has published for this
+  exact pair of models.
+- **The speed trade is genuinely more nuanced than "3x the parameters,
+  3x slower"**: Distil-Whisper's design keeps the *full* large-v3 encoder
+  (frozen, undistilled) but shrinks the decoder to 2 layers (vs.
+  whisper-small's 12). For short voice-command-length audio, the encoder
+  pass is the fixed-ish cost per request (Whisper always processes a
+  30-second window internally regardless of speech length) and it's
+  meaningfully bigger here — but the decode loop, which is what
+  parameter-count comparisons usually assume dominates, is actually
+  *lighter* than whisper-small's. Net effect on CPU for short commands:
+  no confident number exists for this specific pair on short audio, and
+  guessing further wouldn't be honest — genuinely needs a real-machine
+  benchmark once this is built, not a projection.
+- **The actual path to real GPU speed, found and verified feasible**:
+  drop `@huggingface/transformers` for a Node binding around whisper.cpp
+  (which has mature, proven CUDA support on Windows, unlike DirectML) —
+  `nodejs-whisper` (actively maintained, a plain `withCuda: true` option)
+  or `whisper-node-addon` (prebuilt Windows x64 binaries, explicitly
+  built for Electron, recently added CUDA backend binaries) are both
+  real, current candidates. And Distil-Large-v3.5 already has an
+  official GGML conversion (`distil-whisper/distil-large-v3.5-ggml`,
+  published by the Distil-Whisper team itself, not just a community
+  conversion) — meaning both halves of what the user wants (the better
+  model *and* real GPU use) are achievable together, just not through
+  the currently-installed library.
+- **Why this isn't a quick patch**: it's a dependency swap (new native
+  module instead of `@huggingface/transformers`), a model format change
+  (GGML instead of ONNX), and a rewrite of `stt.ts` around a different
+  API shape — a real architecture decision for a subsystem that's
+  currently working, not a one-line model-string edit. Recommended
+  direction: pursue the whisper.cpp + CUDA + Distil-Large-v3.5-ggml path
+  as its own properly-scoped piece of work, the same way Milestone 9 got
+  a design pass before any code — not folded into an already-large
+  session. Pending the user's explicit go-ahead before starting, given
+  the size of the change.
 
 ## Roadmap (in rough priority order)
 1. ~~LLM intent routing (Milestone 5)~~ — done.
@@ -938,11 +1130,13 @@ setup file — did not proceed with it; see Milestone 6 planning notes.
    Milestone 10 instead of built here directly.
 5. ~~**Voice activity detection (VAD)** (Milestone 8)~~ — done, confirmed
    working on the user's real machine. See Status below.
-6. **Task orchestration / multi-step tool calling** (Milestone 9) — next
-   up, the big next architectural piece, confirmed priority, currently
-   being planned (full design doc under Status). Unlocks both real
-   multi-step commands and a two-tier fast/smart model setup, plus a
-   personality baseline fix pulled forward from Milestone 10.
+6. **Task orchestration / multi-step tool calling** (Milestone 9) — in
+   progress. Steps 1-3 of the build order done and confirmed working on
+   the user's real machine (two-tier model calls + personality baseline,
+   the shared tool registry, and the browse tool); steps 4-7
+   (`orchestrator.ts` itself, engine wiring, the Activity panel, tests)
+   still ahead. See Status for the full plan and what's been shipped so
+   far.
 7. **Quality-of-life capabilities** (Milestone 10) — gesture-to-action,
    memory, and more complex consecutive tasks, deliberately grouped and
    deliberately unscoped until Milestone 9 exists (personality moved to
@@ -960,7 +1154,13 @@ setup file — did not proceed with it; see Milestone 6 planning notes.
 9. **Settings panel + persistent dashboard session history** (Milestone
    13) — not started, lower urgency than the above since `.env` config
    and an in-memory log are working fine for now.
-10. **Later still**: plugin/skills system, absolute volume control,
+10. **Dashboard visual refresh** (Milestone 14) and **STT upgrade**
+    (Milestone 15) — both planned (full design under Status), both
+    independent of Milestone 9's remaining steps and can slot in
+    whenever, rather than being strictly ordered before or after it.
+    Milestone 15 additionally needs the user's go-ahead before starting,
+    given it's a real dependency swap, not a quick patch.
+11. **Later still**: plugin/skills system, absolute volume control,
     named-window targeting. Also: the dashboard's "Project tracking"
     coming-soon tile doesn't have a milestone behind it — unlike
     maps/devices/settings, it's not clear yet what real data it would
