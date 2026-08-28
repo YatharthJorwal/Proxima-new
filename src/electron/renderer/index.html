@@ -23,52 +23,6 @@
     <!-- LEFT COLUMN -->
     <section class="col col-left">
       <div class="card">
-        <div class="card-title">PIPELINE</div>
-        <ol class="pipeline" id="pipeline">
-          <li class="pipeline-step" data-stage="listening">
-            <span class="step-mark"></span>
-            <div class="step-body">
-              <div class="step-label">Listening</div>
-              <div class="step-sub" data-role="sub">waiting for hotkey</div>
-            </div>
-            <span class="step-time" data-role="time"></span>
-          </li>
-          <li class="pipeline-step" data-stage="transcribed">
-            <span class="step-mark"></span>
-            <div class="step-body">
-              <div class="step-label">Heard</div>
-              <div class="step-sub" data-role="sub">—</div>
-            </div>
-            <span class="step-time" data-role="time"></span>
-          </li>
-          <li class="pipeline-step" data-stage="routed">
-            <span class="step-mark"></span>
-            <div class="step-body">
-              <div class="step-label">Routed</div>
-              <div class="step-sub" data-role="sub">—</div>
-            </div>
-            <span class="step-time" data-role="time"></span>
-          </li>
-          <li class="pipeline-step" data-stage="reply">
-            <span class="step-mark"></span>
-            <div class="step-body">
-              <div class="step-label">Replying</div>
-              <div class="step-sub" data-role="sub">—</div>
-            </div>
-            <span class="step-time" data-role="time"></span>
-          </li>
-          <li class="pipeline-step" data-stage="speaking">
-            <span class="step-mark"></span>
-            <div class="step-body">
-              <div class="step-label">Speaking</div>
-              <div class="step-sub" data-role="sub">—</div>
-            </div>
-            <span class="step-time" data-role="time"></span>
-          </li>
-        </ol>
-      </div>
-
-      <div class="card">
         <div class="card-title">INPUT</div>
         <form id="inputForm" class="input-row">
           <input id="inputText" type="text" placeholder="Type a command, or press F9 to talk…" autocomplete="off" maxlength="1000" />
@@ -102,6 +56,19 @@
       <div class="orb-caption">
         <span class="orb-title">PROXIMA CORE</span>
         <span class="orb-state" id="orbStateLabel">• IDLE</span>
+      </div>
+
+      <!-- Milestone 9 step 6: replaces the old left-column PIPELINE card
+           (see CLAUDE.md's Milestone 9 plan, item 7, for the design and
+           why it lives here instead). Hidden until the first "listening"
+           event ever fires — see renderer.js's Activity panel section. -->
+      <div class="card activity-card hidden" id="activityCard">
+        <div class="card-title">PROXIMA ACTIVITY</div>
+        <ol class="activity-list" id="activityList"></ol>
+        <div class="activity-final hidden" id="activityFinal">
+          <div class="activity-final-rule"></div>
+          <div class="activity-final-text" id="activityFinalText"></div>
+        </div>
       </div>
     </section>
 

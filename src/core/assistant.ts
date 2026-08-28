@@ -27,20 +27,30 @@ function describeRoute(info: RouteInfo): string {
     case "regex":
       return `regex router (${info.handler})`;
     case "llm-tool":
-      return `LLM tool call (${info.tool})`;
+      return `LLM tool call (${info.tools.join(", ")})`;
     case "conversation":
       return "plain conversation (no command matched)";
   }
 }
 
-engine.on("busy", () => console.log("(still working on the last request, hang on)"));
+engine.on("busy", () => console.log("(still working on the last request — press Enter again to stop it)"));
 engine.on("listening", () => console.log("\n>>> Listening — say something (auto-stops after a pause)..."));
 engine.on("speech-start", () => console.log("(hearing you...)"));
+engine.on("transcribing", () => console.log("(transcribing...)"));
 engine.on("transcribed", (text) => console.log(`You said: "${text}"`));
 engine.on("no-speech", () => console.log("(didn't catch anything)"));
+// Milestone 9 step 6: these four only fire for the orchestrator path —
+// see engine.ts's EngineEvents docs for why a regex-matched command
+// doesn't get them.
+engine.on("deciding", (tier) => console.log(`(deciding — ${tier} tier)`));
+engine.on("tool-start", (name) => console.log(`(running: ${name})`));
+engine.on("tool-result", (name, result) => console.log(`(${name} -> ${result})`));
+engine.on("thinking", (trace) => console.log(`(reasoning trace)\n${trace}\n`));
+engine.on("responding", () => console.log("(putting together a reply...)"));
 engine.on("routed", (info) => console.log(`Routed via: ${describeRoute(info)}`));
 engine.on("reply", (text) => console.log(`Proxy: ${text}`));
 engine.on("speaking", () => console.log("Speaking..."));
+engine.on("cancelled", () => console.log("(stopped)"));
 engine.on("error", (err) => console.error("Error handling request:", err));
 engine.on("idle", () => console.log("\nPress Enter to talk to Proxy again.\n"));
 
@@ -52,7 +62,15 @@ async function main() {
   console.log("\nReady — press Enter in this window to talk to Proxy. (Ctrl+C to quit)\n");
 
   rl.on("line", () => {
-    engine.runOnce();
+    // Milestone 9 step 6: a second Enter press while busy stops the
+    // current run instead of being silently ignored (the previous
+    // behavior — runOnce() itself still just emits "busy" and returns
+    // for a trigger it can't act on).
+    if (engine.isBusy()) {
+      engine.cancel();
+    } else {
+      engine.runOnce();
+    }
   });
 }
 

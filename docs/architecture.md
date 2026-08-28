@@ -24,11 +24,12 @@ The dashboard adds a global hotkey (F9, via Electron's `globalShortcut`) as
 an alternative trigger to the terminal Enter-keypress, and visualizes every
 stage of this pipeline live.
 
-**Note:** Milestone 9 is replacing the "LLM w/ tools" step above with a
-two-tier orchestrator loop (see "Orchestrator & tool system" below). That
-replacement is written (`orchestrator.ts`) but **not yet wired into
-`engine.ts`** — the diagram above is what actually runs today. Status:
-`project-status.md`.
+**Note:** Milestone 9 replaced the "LLM w/ tools" step above with a
+two-tier orchestrator loop (see "Orchestrator & tool system" below) — as
+of step 6, `engine.ts` calls `orchestrator.ts` instead of the old
+`intentRouter.ts`. The diagram above is the pre-Milestone-9 shape; see
+`project-status.md` for the current wired pipeline and what's still
+pending real-machine confirmation.
 
 ## MVP stack (v1, TypeScript/Node)
 
@@ -66,11 +67,15 @@ core/                  (project root — user renamed this from "files/" after M
     commands/           # hardcoded + LLM-routed PC-automation commands
       index.ts          # deterministic regex router (fast path); returns {handler, reply}
       intentRouter.ts   # single-shot LLM tool-calling router (Milestone 5); returns {reply, tool}.
-                         # Still what engine.ts calls today — orchestrator.ts replaces this call
-                         # at build order step 6, not this one.
+                         # No longer called by engine.ts as of Milestone 9 step 6 (orchestrator.ts
+                         # replaced that call) - kept around for now as a reference/fallback, not
+                         # wired into anything. Candidate for deletion once Milestone 9 is confirmed
+                         # solid on the user's real machine.
       orchestrator.ts    # Milestone 9 build order step 4 — the actual multi-step loop (two-tier
-                         # escalation, step cap, defer_to_planner, cancellation). Standalone so
-                         # far, not yet wired into engine.ts.
+                         # escalation, step cap, defer_to_planner, cancellation). Wired into
+                         # engine.ts as of step 6 — replaces the old intentRouter.ts call above.
+      orchestrator.test.ts # Milestone 9 step 5 — mocked control-flow unit tests (`npm test`,
+                         # vitest). Deliberately thin, not exhaustive - see project-status.md.
       tools.ts           # Milestone 9 step 2 — shared tool registry (schemas + dispatch), pulled
                          # out of intentRouter.ts so it and orchestrator.ts share one definition
                          # per tool instead of two copies.
@@ -190,20 +195,47 @@ reply. Design principle: **show the process, never hide it.**
   built yet (camera feed tagged specifically as Milestone 7 / Computer
   Vision, others as "not built yet") rather than displaying fabricated data
   for panels the reference design showed but Proxy doesn't actually have.
-- **Per-stage timing**: each pipeline stage shows a live-ticking timer while
-  active and freezes the elapsed time on completion (via `performance.now()`
-  deltas), plus a real one-line description per stage — not decorative
-  numbers or static captions.
+- **Per-stage timing**: each Activity panel row shows a live-ticking timer
+  while active and freezes the elapsed time on completion (via
+  `performance.now()` deltas), plus a real one-line description per row —
+  not decorative numbers or static captions. (Through Milestone 8, this was
+  the Pipeline card's fixed 5-row list; Milestone 9 step 6 replaced it with
+  the Activity panel — see below.)
 - **Input box**: `proxy.submitText(text)` (`runWithText()` on the engine)
   runs typed text through the identical router/tool-dispatch/TTS path as a
-  spoken command, just skipping recording+STT.
+  spoken command, just skipping recording+STT. As of Milestone 9 step 6, if
+  the box is busy and the typed text is exactly "stop" (case-insensitive),
+  it cancels the in-flight orchestrator run instead of queuing — see
+  "Orchestrator & tool system" below.
 - **Engine events** (emitted by `ProxyEngine`, an `EventEmitter` with no
-  trigger mechanism of its own): `busy`, `listening`, `transcribed`,
-  `no-speech`, `routed`, `reply`, `speaking`, `idle`, `error`, plus
-  `speech-start` (Milestone 8). This is what lets the CLI and dashboard
+  trigger mechanism of its own): `busy`, `listening`, `speech-start`,
+  `transcribing`, `transcribed`, `no-speech`, `deciding`, `tool-start`,
+  `tool-result`, `thinking`, `responding`, `routed`, `reply`, `speaking`,
+  `idle`, `error`, `cancelled`. This is what lets the CLI and dashboard
   observe the exact same pipeline rather than the dashboard re-implementing
-  or scraping it. Milestone 9's Activity panel needs additional events that
-  don't exist yet: `transcribing`, `deciding`, `tool-start`, `tool-result`,
+  or scraping it. The five in the middle (`deciding` through `responding`)
+  only fire for the orchestrator path — a regex-matched command goes
+  straight from `transcribed` to `routed`/`reply`, since a regex hit is a
+  near-instant pattern match, not a decision worth a row of its own.
+  `RouteInfo`'s `llm-tool` variant carries `tools: string[]` (plural, as of
+  step 6) rather than a single tool name, since the orchestrator can chain
+  more than one real tool call per request.
+- **Activity panel** (Milestone 9 step 6, replaces the old fixed 5-row
+  Pipeline card entirely): a live, growing row list built from the engine
+  events above, not a fixed skeleton — a plain "hello" ends up 3-4 rows
+  (Listening → Transcribing → Deciding → Responding), a chained multi-tool
+  request grows one "Executing: `<tool>`" row per loop iteration. Each
+  Deciding row's sub-label shows which tier handled it (`fast tier` /
+  `smart tier`); a smart-tier Deciding row additionally rotates through a
+  short list of dry status words ("Thinking it over," "Working the
+  problem," …) while genuinely indeterminate — fast-tier decisions resolve
+  in well under a second, so they just say "Deciding" plainly, no
+  animation. A Deciding row that got back a real `message.thinking` trace
+  from Ollama gets a "Show reasoning" toggle revealing it verbatim (shown
+  after the fact, not streamed — `chat()` in `llm.ts` isn't a streaming
+  call). Lives beside the orb in the center column now, not the left
+  column. Row/CSS implementation: `renderer.js`'s "Activity panel" section,
+  `style.css`'s matching block.
   `responding` — see `project-status.md`.
 - three.js and the MediaPipe vision bundle are vendored locally
   (`electron/renderer/vendor/`, generated by `copy-assets.js`, not committed
@@ -251,24 +283,24 @@ Camera-card layout: current status of the "move to bottom-left" change is
 flagged as a discrepancy in `project-status.md` — check there before
 assuming it's done or not done.
 
-## Orchestrator & tool system (Milestone 9 — partially built)
+## Orchestrator & tool system (Milestone 9 — wired in as of step 6)
 
 - `tools.ts` — shared tool registry (schemas + dispatch), pulled out of
   `intentRouter.ts` so both it and `orchestrator.ts` share one definition
   per tool instead of two copies. Each tool schema carries:
   - `resultInformsNextStep` (default `false`) — true only for a tool whose
     output the model needs to reason about before deciding what's next.
-    None of the current tools (open app, volume, window) need it.
+    None of the current tools (open app, volume, window, browse) need it.
   - `requiresConfirmation` — built now, unused for now; no current tool is
     destructive enough to need it, but a future tool can flip it on.
 - `orchestrator.ts` — the multi-step loop: LLM proposes a step, step
   executes, result feeds back to the LLM, repeat until it signals done or a
   safety cap is hit (a small ReAct-style agent loop). Includes escalation
   between the two model tiers, a step cap (`PROXY_ORCHESTRATOR_MAX_STEPS`,
-  default 5), a `defer_to_planner` signal, and cancellation support (a
-  second hotkey press or spoken "stop" aborts the current run). **Written,
-  not yet wired into `engine.ts`** — `engine.ts` still calls
-  `intentRouter.ts`'s single-shot router today.
+  default 5), a `defer_to_planner` signal, and cancellation support. **Wired
+  into `engine.ts` as of step 6** — `engine.ts` calls `orchestrator.run()`
+  instead of `intentRouter.ts`'s single-shot router now. 11 mocked unit
+  tests (`orchestrator.test.ts`, `npm test`) cover its control flow.
 - `browse.ts` / `launch.ts` — "open/search site" via URL templating (no
   browser automation): YouTube's `/results?search_query=`, Google's
   `/search?q=`, etc. `launch.ts` is the shared `Start-Process` launcher
@@ -278,6 +310,12 @@ assuming it's done or not done.
   `qwen3.5:9b` (`think: true`) for turn 2+ if the request actually needs
   more steps. Model *choice* rationale and rejected alternatives:
   `decisions.md`.
+- **Cancellation**: `ProxyEngine.cancel()` forwards to
+  `Orchestrator.cancel()`, which sets a flag checked at the next loop
+  boundary (not mid-request — see `decisions.md` for why true mid-flight
+  abort wasn't attempted). Triggered by a second hotkey press (Electron), a
+  second Enter press (CLI), or typing "stop" into the dashboard's Input box
+  while busy.
 
-Rollout status of each piece above (built/tested/wired) lives in
-`project-status.md`, not here.
+Rollout status of each piece above (built/tested/wired/real-machine
+confirmed) lives in `project-status.md`, not here.

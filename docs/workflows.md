@@ -14,6 +14,9 @@ verification actually happens here.
 - `npm run setup:cv` — one-time download of `hand_landmarker.task` via
   `scripts/download-hand-model.js`. Needed once before CV works locally,
   since the build sandbox has no network access to fetch it itself.
+- `npm test` — runs `orchestrator.test.ts` via `vitest` (Milestone 9 step
+  5). 11 mocked control-flow tests, no real Ollama/mic needed — safe to
+  run in the sandbox.
 
 ## Configuration (`.env`)
 
@@ -31,8 +34,10 @@ assistant.
   threshold escape hatch, bypasses calibration when set) — Milestone 8 VAD
   knobs, read in `engine.ts`. Mechanics: `architecture.md`.
 - `PROXY_ORCHESTRATOR_MAX_STEPS` (default 5) — Milestone 9 orchestrator step
-  cap (orchestrator is written but not yet wired in — see
-  `project-status.md`).
+  cap. Wired into `engine.ts` as of step 6 — read there, passed into
+  `orchestrator.run()`. `orchestrator.ts` itself has its own internal
+  default (5) so it stays independently usable/testable without
+  `engine.ts` or a `.env` file.
 
 ## Verification workflow (sandbox vs. real machine)
 
@@ -57,9 +62,9 @@ work here has to be verified:
    working on the user's machine").
 4. For control-flow logic that doesn't need real hardware to exercise (e.g.
    the orchestrator's escalation/step-cap/cancellation logic), prefer
-   mocked unit tests over waiting for a real-machine pass — this was the
-   plan for Milestone 9 step 5 and is a reasonable general pattern for
-   future control-flow-heavy features.
+   mocked unit tests over waiting for a real-machine pass — this is what
+   Milestone 9 step 5 did (`orchestrator.test.ts`, `npm test`) and is a
+   reasonable general pattern for future control-flow-heavy features.
 
 ## Patch delivery for small, isolated changes
 

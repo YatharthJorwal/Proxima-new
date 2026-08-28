@@ -3,34 +3,29 @@
 Current milestone-by-milestone status. For *how* things work, see
 `architecture.md`; for *why* choices were made, see `decisions.md`.
 
-## ⚠️ Two flagged discrepancies (need your confirmation)
+## ⚠️ One remaining flagged discrepancy (needs your confirmation)
 
-While reorganizing the original `CLAUDE.md`, two places where it contradicted
-itself (or was ambiguous about current truth) turned up. Rather than guess,
-both are called out here — please confirm the real current state and I'll
-update these docs accordingly.
+While reorganizing the original `CLAUDE.md`, two places where it
+contradicted itself (or was ambiguous about current truth) turned up.
 
-1. **Milestone 9's true current step.** One part of the original doc (the
-   top-level roadmap list) said: *"Steps 1-3 of the build order done and
-   confirmed working... steps 4-7 still ahead."* But the project's own
-   directory-structure notes, and the latest commit (`M9 Step4`), show that
-   step 4 (`orchestrator.ts`) has actually been **written** — just not yet
-   wired into `engine.ts` or unit-tested. So "step 4 still ahead" reads as
-   stale. The status below treats step 4 as "written, not wired/tested" —
-   please confirm that's accurate.
-2. **Camera card position.** The Milestone 7 entry in the original numbered
-   milestone list says: *"Pending UI tweak, not yet built: move the Camera
-   card to the bottom-left corner."* But the more detailed Milestone 7
-   status notes, later in the same original file, say the move **was**
-   made: *"Camera card moved to the bottom-left corner (below OUTPUT), per
-   request — patch delivered (`camera-card-move.patch`), applied and built
-   cleanly in clean-room verification... not yet visually confirmed by the
-   user on their own screen."* Git history also shows a commit for this
-   (`Move Camera card to bottom-left, below OUTPUT`). These two statements
-   directly conflict ("not yet built" vs. "applied and built cleanly"). The
-   status below treats it as **done, pending your visual confirmation** —
-   please confirm you've actually seen it in the bottom-left on your
-   machine.
+1. ~~**Milestone 9's true current step.**~~ — RESOLVED. Since this
+   reorg happened, Milestone 9 moved forward for real: step 4
+   (`orchestrator.ts`) is wired into `engine.ts` (step 6), replacing the
+   old `intentRouter.ts` call; the Activity panel dashboard component
+   (also step 6) is built; and a thin slice of mocked unit tests (step
+   5, 11 tests, `npm test`) passes. See the Milestone 9 section below
+   for the accurate current step-by-step status.
+2. **Camera card position.** The Milestone 7 entry in the original
+   numbered milestone list said: *"Pending UI tweak, not yet built: move
+   the Camera card to the bottom-left corner."* But the more detailed
+   Milestone 7 status notes, later in the same original file, said the
+   move **was** made. Checked directly against the actual code just now:
+   `index.html`'s left column really does order the cards Pipeline →
+   Input → Output → **Camera** → System Status → Session Log — the
+   Camera card genuinely sits below Output, confirming the code-level
+   claim. What's still outstanding is only the user's own visual
+   confirmation on their actual screen — please confirm you've seen it
+   there.
 
 ## Roadmap snapshot
 
@@ -44,8 +39,8 @@ update these docs accordingly.
    only) done, confirmed working; gesture-to-action wiring deferred to
    Milestone 10
 8. ~~Voice activity detection (VAD)~~ — done, confirmed working
-9. Task orchestration / multi-step tool calling — **in progress**, see
-   detailed status below (and the flagged discrepancy above)
+9. Task orchestration / multi-step tool calling — **in progress, steps
+   1-6 of 7 built**, see detailed status below
 10. Quality-of-life capabilities (gesture wiring, memory, complex multi-step
     tasks) as orchestrator tools — not started, not scoped in detail yet
 11. Maps / location awareness — not started
@@ -144,7 +139,8 @@ bespoke integration).
   isolation (see `architecture.md`) held up in practice too — no crash
   cascade into the rest of the dashboard during setup/testing.
 - **Camera card position** — see the flagged discrepancy at the top of this
-  file.
+  file (code-level move confirmed; your visual confirmation is the only
+  thing still outstanding).
 - Implementation details (model download, vendoring, coordinate mapping,
   permission handling): `architecture.md`.
 
@@ -158,13 +154,13 @@ env knobs, and the calibration edge case are documented in
 function, to avoid a code path that no longer matches what the UI claims is
 happening.
 
-## Milestone 9 — Task orchestration — in progress
+## Milestone 9 — Task orchestration — in progress, steps 1-6 of 7 built
 
-The big next architectural piece. Current `intentRouter.ts` handles exactly
-one tool call per utterance — it can't chain steps, so "open notepad and
-snap it to the left" doesn't work (`control_window` acts on whatever's
+The big next architectural piece. The old `intentRouter.ts` handled exactly
+one tool call per utterance — it couldn't chain steps, so "open notepad and
+snap it to the left" didn't work (`control_window` acts on whatever's
 focused, which only becomes the new window *after* `open_app` has actually
-finished).
+finished). `engine.ts` no longer calls `intentRouter.ts` as of step 6 below.
 
 **Build order and status:**
 1. Two-tier model calls (`qwen3.5:4b` fast / `qwen3.5:9b` smart) +
@@ -173,53 +169,86 @@ finished).
 2. `tools.ts` shared tool registry — **done, confirmed**.
 3. `browse.ts` tool + shared `launch.ts` launcher — **done, confirmed**.
 4. `orchestrator.ts` — the actual multi-step loop (escalation, step cap,
-   `defer_to_planner`, cancellation) — **written** (latest commit,
-   `M9 Step4`), but **standalone so far, not yet wired into `engine.ts`**,
-   and not yet unit-tested. See the flagged discrepancy at the top of this
-   file re: whether this should still be described as "ahead."
-5. A thin slice of orchestrator unit tests (mocked, no real Ollama/mic
-   needed) — not yet done.
-6. Wiring the orchestrator into `engine.ts`, replacing the `intentRouter.ts`
-   call — not yet done.
-7. The new Activity panel in the dashboard (per-step visibility for the
-   orchestrator loop) — not yet built. Design below.
+   `defer_to_planner`, cancellation) — **done**. Built and typechecked in
+   the sandbox; not independently real-machine-tested on its own since
+   step 6 wired it in immediately after.
+5. A thin slice of orchestrator unit tests — **done**. 11 mocked tests
+   (`src/commands/orchestrator.test.ts`, `npm test`, `vitest`) covering
+   plain replies, one confident tool call, `defer_to_planner` exposure,
+   escalation, multi-tool chaining, the honest step-cap message,
+   cancellation, tool-dispatch-failure resilience, and the forward-looking
+   `resultInformsNextStep` path. No real Ollama/mic needed — all pass in
+   the sandbox. `vitest` is a new devDependency; nothing tested this repo
+   before.
+6. Wiring the orchestrator into `engine.ts` (replacing `intentRouter.ts`),
+   plus the new Activity panel dashboard component — **done, built and
+   typechecked/built clean in the sandbox, not yet real-machine tested.**
+   See "Activity panel" and "Cancellation" below for what actually shipped
+   here versus the original plan.
+7. **Not yet done** — real-machine test cases: "hello" (should stay a
+   one-fast-tier-call plain reply), "open notepad and snap it to the left"
+   (should chain two tool calls through the smart tier), "who made you"
+   (should surface the personality/creator bio). This is the one remaining
+   piece of Milestone 9, and it needs the user's actual machine, real
+   Ollama, and the real dashboard — nothing further to verify from the
+   sandbox alone.
 
-**Processing pipeline design** (target shape once wired): hotkey → VAD →
-regex fast path (unchanged) → orchestrator loop. Turn 1 of every request
-goes to the fast model (`think: false`); the loop only escalates to the
-smart model (`think: true`) for turn 2+ once a request is shown to need
-more steps. Simple utterances ("hello," "volume up") resolve in one
-fast-model call, same latency as today; genuinely multi-step requests pay
-for the smarter model only once that's demonstrated necessary.
+**Processing pipeline** (as actually wired now): hotkey → VAD → regex fast
+path (unchanged) → orchestrator loop. Turn 1 of every request goes to the
+fast model (`think: false`); the loop only escalates to the smart model
+(`think: true`) for turn 2+ once a request is shown to need more steps.
+Simple utterances ("hello," "volume up") resolve in one fast-model call,
+same latency as before; genuinely multi-step requests pay for the smarter
+model only once that's demonstrated necessary.
 
 **Safety surface**: a multi-step loop can compound a wrong turn across
-several actions instead of one. Mitigations: a real step cap
-(`PROXY_ORCHESTRATOR_MAX_STEPS`, default 5), a `requiresConfirmation` hook
-on the tool schema (built now, unused — no current tool is destructive
-enough to need it), and a minimal way to interrupt a stuck/long-running loop
-(a second hotkey press or spoken "stop"). These were added after
+several actions instead of one. Mitigations, all shipped: a real step cap
+(`PROXY_ORCHESTRATOR_MAX_STEPS`, default 5, returning an honest "I've done a
+few things but want to check in" if hit before the model signals done — not
+a silent stop or a false completion claim), a `requiresConfirmation` hook on
+the tool schema (built, still unused — no current tool is destructive enough
+to need it), and cancellation (see below). These were added after
 reconciling the design against an external architecture review — full
 reconciliation: `decisions.md`.
 
-**Personality baseline**: the user flagged that Proxy's replies feel
-flat/corporate (literally parroting its own tool descriptions back when it
-doesn't understand something). Since `llm.ts`'s system prompt is being
-rewritten anyway for the two-tier setup, a real personality pass (some wit,
-not a support-bot tone) and a short static bio about the user are shipping
-as part of Milestone 9, not deferred to Milestone 10. What stays in
-Milestone 10 is *dynamic*, memory-driven personalization; Milestone 9 only
-ships the fixed baseline. Rationale for pulling this forward:
-`decisions.md`. **Open item**: the actual personality/bio copy needs input
-from the user before it can be finalized (see Open Questions below).
+**Cancellation — shipped narrower than "spoken stop."** The original plan
+said "a second hotkey press or spoken 'stop.'" What actually shipped: a
+second hotkey press (Electron), a second Enter press (CLI), or typing the
+literal word "stop" into the dashboard's Input box while busy — all three
+call `ProxyEngine.cancel()`, which only takes effect at the orchestrator's
+next loop boundary, not mid-request (aborting an in-flight Ollama call
+mid-flight would need an `AbortController` threaded through the client and
+every tool executor — real, separate complexity, not attempted). True
+*spoken* "stop" — recognizing the word out loud while Proxy is still
+mid-pipeline — would need a second, always-on audio channel running in
+parallel with the main one; genuinely separate scope, deliberately not
+built. Typed "stop" is the practical stand-in. Full rationale: `decisions.md`.
 
-**Activity panel** (dashboard component, not yet built): per-step
-visibility for the orchestrator loop, replacing a vague "it's thinking"
-state with real per-step rows (e.g. "Deciding," "Executing: toolname").
-Later folded into the Milestone 14 visual-refresh plan, which restyles the
-row labels for more character (e.g. "Deciding" → "Analyzing Input") while
-keeping the underlying rule: every row still has to map to something that
-actually happened, at the time it actually finished — timers shown per row
-are real elapsed time, not decorative numbers.
+**Personality baseline** — **done, shipped in step 1**, not an open item
+anymore (an earlier version of this doc listed it as still pending the
+user's input — stale; the creator bio and personality tone are already
+live in `llm.ts`'s system prompt).
+
+**Activity panel — done, replaces the old Pipeline card entirely** (not
+just "not yet built" as an earlier version of this doc said). Real
+per-step visibility for the orchestrator loop: a live, growing row list
+(not a fixed skeleton) — "Listening," "Transcribing," "Deciding,"
+"Executing: <tool>" (one row per loop iteration, so a two-tool chain shows
+two rows), "Responding." A regex-matched command shows only Listening and
+Transcribing, then the final reply — no fake "Deciding" row invented for
+something that was actually an instant pattern match. A tier indicator
+("fast tier" / "smart tier") sits on each Deciding row's sub-label; a
+rotating dry-witted status word (e.g. "Thinking it over," "Working the
+problem") only replaces the label during a genuinely-indeterminate
+smart-tier wait — fast-tier decisions resolve in well under a second, so
+they just say "Deciding" plainly. A real reasoning trace (`message.thinking`
+from Ollama, when the smart tier produces one) is shown after the fact
+(not streamed — `chat()` in `llm.ts` isn't a streaming call, so there's
+nothing to stream live) behind a "Show reasoning" toggle on the row that
+produced it. Milestone 14's planned relabeling (e.g. "Deciding" →
+"Analyzing Input") still applies on top of this later — the underlying
+rule doesn't change: every row still has to map to something that
+actually happened, at the time it actually finished.
 
 **Tool schema fields** (`resultInformsNextStep`, `requiresConfirmation`):
 field definitions and current usage are in `architecture.md`; the reasoning
@@ -390,16 +419,13 @@ size of the change.
 
 ## Open questions (need your input)
 
-- **Milestone 9 build-order status**: is step 4 (`orchestrator.ts`) meant
-  to be treated as done-but-unwired, or is there more to finish on it
-  before moving to step 5? (See flagged discrepancy at the top of this
-  file.)
+- **Milestone 9, step 7**: run the three real-machine test cases above
+  ("hello," "open notepad and snap it to the left," "who made you") and
+  report back — this is the only thing left before Milestone 9 can be
+  called done.
 - **Camera card position**: can you confirm you've actually seen it in the
-  bottom-left on your machine? (See flagged discrepancy at the top of this
-  file.)
-- **Personality/creator bio copy**: Milestone 9's personality baseline pass
-  needs a short static bio about you (the creator) so Proxy can refer to
-  you naturally — this needs your input before the copy can be finalized.
+  bottom-left on your machine? (See the flagged discrepancy at the top of
+  this file — the code itself already checks out.)
 - **Milestone 15 go-ahead**: do you want to proceed with the whisper.cpp +
   CUDA + Distil-Large-v3.5-ggml path? It's a real architecture change (new
   native module, new model format, `stt.ts` rewrite), not a quick patch —

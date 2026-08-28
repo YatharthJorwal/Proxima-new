@@ -12,7 +12,10 @@
  *      keylogger-shaped. This also incidentally fixes the window-control
  *      focus-timing issue from Milestone 3 — you no longer have to Alt-Tab
  *      to your target app *before* the recording window starts, since
- *      triggering no longer requires focusing a terminal at all.
+ *      triggering no longer requires focusing a terminal at all. As of
+ *      Milestone 9 step 6, a second press while Proxy is busy cancels
+ *      the in-flight orchestrator run instead of being ignored — see
+ *      ProxyEngine.cancel()'s docs in core/engine.ts.
  *   2. Forward every ProxyEngine event to the renderer over IPC, verbatim.
  *      No summarizing, no filtering, no separate "status string" logic —
  *      the dashboard shows exactly what engine.ts emits. That's the
@@ -65,20 +68,44 @@ function wireEngineEvents() {
   engine.on("busy", () => send("proxy:busy"));
   engine.on("listening", (info) => send("proxy:listening", info));
   engine.on("speech-start", () => send("proxy:speech-start"));
+  engine.on("transcribing", () => send("proxy:transcribing"));
   engine.on("transcribed", (text) => send("proxy:transcribed", text));
   engine.on("no-speech", () => send("proxy:no-speech"));
+  // Milestone 9 step 6 — orchestrator-path-only events, see
+  // EngineEvents in core/engine.ts.
+  engine.on("deciding", (tier) => send("proxy:deciding", tier));
+  engine.on("tool-start", (name) => send("proxy:tool-start", name));
+  engine.on("tool-result", (name, result) => send("proxy:tool-result", { name, result }));
+  engine.on("thinking", (trace) => send("proxy:thinking", trace));
+  engine.on("responding", () => send("proxy:responding"));
   engine.on("routed", (info: RouteInfo) => send("proxy:routed", info));
   engine.on("reply", (text) => send("proxy:reply", text));
   engine.on("speaking", () => send("proxy:speaking"));
+  engine.on("cancelled", () => send("proxy:cancelled"));
   engine.on("idle", () => send("proxy:idle"));
   engine.on("error", (err: Error) => send("proxy:error", err.message));
 }
 
+// Milestone 9 step 6: the two write-paths the renderer has into main
+// (hotkey, typed text) both now double as the cancellation trigger
+// CLAUDE.md's orchestrator plan calls for — a repeat trigger while busy
+// stops the current run instead of being silently ignored. Typed "stop"
+// is the practical stand-in for "spoken stop" specifically: recognizing
+// a spoken interrupt WHILE Proxy is still mid-pipeline would need a
+// second, always-on audio channel running in parallel with the main one
+// — real, separate complexity that's out of scope for what CLAUDE.md
+// calls "a minimal cancellation path." Everything else typed while busy
+// still just disappears — that's the known, already-documented
+// Milestone 14 limitation, unchanged here.
 function wireRendererCommands() {
   ipcMain.on("proxy:submit-text", (_event, text) => {
     if (typeof text !== "string") return;
     const trimmed = text.trim().slice(0, MAX_TYPED_INPUT_LENGTH);
     if (!trimmed) return;
+    if (engine.isBusy() && trimmed.toLowerCase() === "stop") {
+      engine.cancel();
+      return;
+    }
     engine.runWithText(trimmed);
   });
 }
@@ -138,7 +165,14 @@ app.whenReady().then(async () => {
   send("proxy:ready", { hotkey: HOTKEY });
 
   const registered = globalShortcut.register(HOTKEY, () => {
-    engine.runOnce();
+    // Milestone 9 step 6: pressing the hotkey again while busy cancels
+    // the current run instead of the old silent no-op (runOnce() itself
+    // still just emits "busy" and returns for a trigger it can't act on).
+    if (engine.isBusy()) {
+      engine.cancel();
+    } else {
+      engine.runOnce();
+    }
   });
 
   if (!registered) {

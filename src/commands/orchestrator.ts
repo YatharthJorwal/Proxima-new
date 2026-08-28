@@ -5,9 +5,11 @@
  * into a real multi-step agent. It does NOT replace intentRouter.ts yet —
  * that swap (engine.ts calling this instead) is build order step 6, along
  * with the Activity panel that visualizes the events this module emits.
- * Built standalone first, deliberately, so it can be exercised by the
- * unit tests in step 5 without needing engine.ts, a mic, or real Ollama —
+ * Built standalone first, deliberately, so it could be exercised by
+ * step 5's unit tests without needing engine.ts, a mic, or real Ollama —
  * see CLAUDE.md's Milestone 9 plan section 8 for the full build order.
+ * Step 6 is what actually calls this from engine.ts now, replacing the
+ * old single-shot intentRouter.ts call.
  *
  * Shape, per that plan (section 1):
  *   1. Turn 1 always goes to the FAST tier (qwen3.5:4b, think: false),
@@ -43,7 +45,7 @@
 
 import { EventEmitter } from "events";
 import { Message, Tool } from "ollama";
-import { chat } from "../core/llm";
+import { chat, ModelTier } from "../core/llm";
 import { TOOLS, getToolSchemas, dispatchTool } from "./tools";
 
 const DEFAULT_MAX_STEPS = 5;
@@ -84,13 +86,17 @@ export interface OrchestratorResult {
 }
 
 export declare interface Orchestrator {
-  on(event: "deciding", listener: () => void): this;
+  // tier is carried on "deciding" so a listener (the dashboard's
+  // Activity panel) can tell a near-instant fast-tier decision apart
+  // from a genuinely-takes-a-few-seconds smart-tier one, without
+  // guessing from timing.
+  on(event: "deciding", listener: (tier: ModelTier) => void): this;
   on(event: "tool-start", listener: (toolName: string) => void): this;
   on(event: "tool-result", listener: (toolName: string, result: string) => void): this;
   on(event: "thinking", listener: (trace: string) => void): this;
   on(event: "responding", listener: () => void): this;
   on(event: "cancelled", listener: () => void): this;
-  emit(event: "deciding"): boolean;
+  emit(event: "deciding", tier: ModelTier): boolean;
   emit(event: "tool-start", toolName: string): boolean;
   emit(event: "tool-result", toolName: string, result: string): boolean;
   emit(event: "thinking", trace: string): boolean;
@@ -128,7 +134,7 @@ export class Orchestrator extends EventEmitter {
     const messages: Message[] = [{ role: "user", content: text }];
 
     // --- Turn 1: fast tier, always ---
-    this.emit("deciding");
+    this.emit("deciding", "fast");
     const fastResult = await chat({
       tier: "fast",
       messages,
@@ -195,7 +201,7 @@ export class Orchestrator extends EventEmitter {
         };
       }
 
-      this.emit("deciding");
+      this.emit("deciding", "smart");
       const result = await chat({
         tier: "smart",
         messages,

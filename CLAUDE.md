@@ -66,10 +66,9 @@ layout: `docs/architecture.md`.
 Milestones 1–8 (audio pipeline, STT, hardcoded commands, TTS, LLM intent
 routing, dashboard, first CV slice, VAD) are built and confirmed working on
 the user's real machine. Milestone 9 (task orchestration / multi-step tool
-calling) is in progress — see `docs/project-status.md` for exactly which
-step. **There is one open discrepancy in the pre-refactor doc about
-Milestone 9's true current step — flagged at the top of
-`docs/project-status.md`, needs your confirmation.**
+calling) is in progress — steps 1-6 of 7 built (including engine wiring and
+the dashboard's Activity panel), step 7 (real-machine test cases) is what's
+left. See `docs/project-status.md` for the full breakdown.
 
 ## Documentation
 - `docs/architecture.md` — the pipeline, stack table, directory structure,

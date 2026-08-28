@@ -6,12 +6,18 @@
  * since this is a local-first app (three.js is copied into
  * vendor/three.module.js by scripts/copy-assets.js at build time).
  *
- * Everything on screen — the pipeline timings, the orb's state, the log —
- * comes straight from window.proxy.on(...), which preload.ts wires to the
- * real ProxyEngine events. The orb's rotation/color/pulse are the one
- * place this file makes an interpretive call (mapping engine events to a
- * visual "mood"), but the mapping is fixed and documented below — it
- * can't drift into showing something that isn't happening.
+ * Everything on screen — the Activity panel's rows, the orb's state, the
+ * log — comes straight from window.proxy.on(...), which preload.ts wires
+ * to the real ProxyEngine events. The orb's rotation/color/pulse are the
+ * one place this file makes an interpretive call (mapping engine events
+ * to a visual "mood"), but the mapping is fixed and documented below —
+ * it can't drift into showing something that isn't happening.
+ *
+ * Milestone 9 step 6: the old fixed 5-row PIPELINE card is gone,
+ * replaced by the Activity panel (see the section below, and CLAUDE.md's
+ * Milestone 9 plan item 7 for the design) — a live, growing list driven
+ * by real orchestrator events instead of a fixed skeleton, since the
+ * orchestrator's step count is genuinely variable now.
  */
 
 import * as THREE from "./vendor/three.module.js";
@@ -57,62 +63,121 @@ function updateUptime() {
 setInterval(updateUptime, 1000);
 
 // ================================================================
-// Pipeline stage list — real per-stage timing, not decoration.
-// Each stage row shows: pending (dim) -> active (pulsing, live timer
-// counting up) -> done (checkmark color, frozen elapsed time).
+// Activity panel (Milestone 9 step 6) — replaces the old fixed 5-row
+// PIPELINE card. Rows are a live, growing list appended one at a time as
+// real events arrive, not a fixed skeleton — see CLAUDE.md's Milestone 9
+// plan, item 7, for the full design and reasoning this follows.
+//
+// Row lifecycle: addActivityRow() appends a new <li>, live (pulsing dot,
+// ticking elapsed timer) until resolveActivityRow() freezes it (done
+// checkmark, frozen time). At most one row is ever "current" (live) at a
+// time — the loop this drives (see engine.ts) is strictly sequential,
+// never concurrent, so there's never a need to track more than one.
 // ================================================================
 
-const STAGES = ["listening", "transcribed", "routed", "reply", "speaking"];
-const stepEls = Object.fromEntries(
-  STAGES.map((stage) => [stage, document.querySelector(`.pipeline-step[data-stage="${stage}"]`)])
-);
+const activityCard = document.getElementById("activityCard");
+const activityList = document.getElementById("activityList");
+const activityFinal = document.getElementById("activityFinal");
+const activityFinalText = document.getElementById("activityFinalText");
 
-let activeStage = null;
-let activeStageStart = null;
-let tickHandle = null;
+// Rotating status words for the ONE genuinely-indeterminate wait in this
+// pipeline: a smart-tier "Deciding" row. Fast-tier decisions resolve in
+// a few hundred ms, so they just show "Deciding" plainly — no point
+// animating something that's already over by the time you'd notice.
+// Kept short and dry, matching Proxy's own personality prompt (llm.ts)
+// rather than going for full whimsy.
+const SMART_TIER_WORDS = ["Thinking it over", "Working the problem", "Weighing the options", "Doing the math", "Mulling it over"];
+
+let currentRow = null; // the one live (unresolved) row, if any
+let lastDecidingRow = null; // most recent Deciding row — thinking traces attach here
+let turnInProgress = false; // see the "transcribed" handler below for why this exists
 
 function fmtElapsed(ms) {
   return `${(ms / 1000).toFixed(2)}s`;
 }
 
-function setStepSub(stage, text) {
-  stepEls[stage].querySelector('[data-role="sub"]').textContent = text;
+function resetActivityPanel() {
+  activityList.innerHTML = "";
+  activityFinal.classList.add("hidden");
+  activityFinalText.textContent = "";
+  currentRow = null;
+  lastDecidingRow = null;
 }
 
-function freezeActiveStage() {
-  if (activeStage === null) return;
-  const elapsed = performance.now() - activeStageStart;
-  stepEls[activeStage].querySelector('[data-role="time"]').textContent = fmtElapsed(elapsed);
-  stepEls[activeStage].classList.remove("active");
-  stepEls[activeStage].classList.add("done");
-  if (tickHandle) clearInterval(tickHandle);
-  tickHandle = null;
-  activeStage = null;
+function showActivityPanel() {
+  activityCard.classList.remove("hidden");
 }
 
-function beginStage(stage, opts = {}) {
-  freezeActiveStage();
-  activeStage = stage;
-  activeStageStart = performance.now();
-  stepEls[stage].classList.add("active");
-  if (opts.action) stepEls[stage].classList.add("action");
-  const timeEl = stepEls[stage].querySelector('[data-role="time"]');
-  tickHandle = setInterval(() => {
-    timeEl.textContent = fmtElapsed(performance.now() - activeStageStart);
+function addActivityRow(label, opts = {}) {
+  const li = document.createElement("li");
+  li.className = "activity-row active" + (opts.action ? " action" : "");
+  li.innerHTML = `
+    <div class="activity-row-main">
+      <span class="activity-mark"></span>
+      <div class="activity-body">
+        <div class="activity-label"></div>
+        <div class="activity-sub"></div>
+      </div>
+      <span class="activity-time"></span>
+    </div>
+  `;
+  const labelEl = li.querySelector(".activity-label");
+  const subEl = li.querySelector(".activity-sub");
+  labelEl.textContent = opts.rotateWords ? SMART_TIER_WORDS[0] : label;
+  if (opts.sub) subEl.textContent = opts.sub;
+  activityList.appendChild(li);
+  activityList.scrollTop = activityList.scrollHeight;
+
+  const row = { el: li, labelEl, subEl, timeEl: li.querySelector(".activity-time"), startedAt: performance.now(), tickHandle: null, wordHandle: null };
+  row.tickHandle = setInterval(() => {
+    row.timeEl.textContent = fmtElapsed(performance.now() - row.startedAt);
   }, 100);
+
+  if (opts.rotateWords) {
+    let i = 0;
+    row.wordHandle = setInterval(() => {
+      i = (i + 1) % SMART_TIER_WORDS.length;
+      row.labelEl.textContent = SMART_TIER_WORDS[i];
+    }, 1400);
+  }
+
+  currentRow = row;
+  return row;
 }
 
-function resetPipeline() {
-  freezeActiveStage();
-  STAGES.forEach((stage) => {
-    stepEls[stage].classList.remove("active", "done", "action");
-    stepEls[stage].querySelector('[data-role="time"]').textContent = "";
+function resolveActivityRow(row, opts = {}) {
+  if (!row) return;
+  if (row.tickHandle) clearInterval(row.tickHandle);
+  if (row.wordHandle) clearInterval(row.wordHandle);
+  row.timeEl.textContent = fmtElapsed(performance.now() - row.startedAt);
+  row.el.classList.remove("active");
+  row.el.classList.add(opts.stopped ? "stopped" : "done");
+  if (opts.label) row.labelEl.textContent = opts.label;
+  if (opts.sub) row.subEl.textContent = opts.sub;
+  if (row === currentRow) currentRow = null;
+}
+
+// Real reasoning trace toggle (smart-tier rows only) — shown after the
+// fact, since chat() (llm.ts) isn't a streaming call, so there's nothing
+// to stream live. Not a fabricated "AI is thinking..." spinner; this is
+// the model's actual `message.thinking` output, verbatim.
+function attachThinkingTrace(row, trace) {
+  if (!row) return;
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "activity-expand";
+  toggle.textContent = "Show reasoning \u25B8";
+  const traceEl = document.createElement("div");
+  traceEl.className = "activity-thinking hidden";
+  traceEl.textContent = trace; // textContent, never innerHTML — model output, never trusted as markup
+  let expanded = false;
+  toggle.addEventListener("click", () => {
+    expanded = !expanded;
+    traceEl.classList.toggle("hidden", !expanded);
+    toggle.textContent = expanded ? "Hide reasoning \u25BE" : "Show reasoning \u25B8";
   });
-  setStepSub("listening", "waiting for hotkey");
-  setStepSub("transcribed", "—");
-  setStepSub("routed", "—");
-  setStepSub("reply", "—");
-  setStepSub("speaking", "—");
+  row.el.appendChild(toggle);
+  row.el.appendChild(traceEl);
 }
 
 // ================================================================
@@ -264,7 +329,9 @@ function appendLog(kind, text) {
 function describeRoute(info) {
   if (!info) return "unknown routing";
   if (info.source === "regex") return `regex → ${info.handler}`;
-  if (info.source === "llm-tool") return `LLM tool → ${info.tool}`;
+  // Milestone 9 step 6: tools (plural) — the orchestrator can chain more
+  // than one real tool call per request now.
+  if (info.source === "llm-tool") return `LLM tool → ${info.tools.join(", ")}`;
   return "conversation (no command)";
 }
 
@@ -288,12 +355,13 @@ window.proxy.on("listening", (info) => {
   // there's nothing honest to count down. info.maxMs is only the hard
   // safety cap — recording actually stops on silence, well before that
   // in the normal case. See engine.ts's "listening" event docs.
-  resetPipeline();
+  turnInProgress = true;
+  resetActivityPanel();
+  showActivityPanel();
+  addActivityRow("Listening", { sub: "waiting for you to speak…" });
   statusDot.classList.add("active");
   statusDot.classList.remove("alarm");
   setOrbState("listening");
-  beginStage("listening");
-  setStepSub("listening", "waiting for you to speak…");
   appendLog("status", `listening (auto-stops after a pause, max ${Math.round(info.maxMs / 1000)}s)`);
   outputBox.innerHTML = '<span class="output-empty">Listening…</span>';
 });
@@ -301,53 +369,108 @@ window.proxy.on("listening", (info) => {
 window.proxy.on("speech-start", () => {
   // Real signal, not decoration: this only fires once recorded energy
   // actually crossed the VAD's speech threshold.
-  setStepSub("listening", "hearing you — pause when done");
+  if (currentRow) currentRow.subEl.textContent = "hearing you — pause when done";
   appendLog("status", "hearing you...");
 });
 
 window.proxy.on("busy", () => {
-  appendLog("status", "still working on the last request — ignored");
+  appendLog("status", 'still working on the last request — press the hotkey again (or type "stop") to cancel it');
 });
 
 window.proxy.on("no-speech", () => {
-  freezeActiveStage();
+  resolveActivityRow(currentRow, { label: "Nothing heard", stopped: true });
   setOrbState("idle");
   appendLog("status", "didn't catch anything");
   outputBox.innerHTML = '<span class="output-empty">Didn\u2019t catch anything.</span>';
 });
 
+window.proxy.on("transcribing", () => {
+  resolveActivityRow(currentRow);
+  addActivityRow("Transcribing");
+});
+
 window.proxy.on("transcribed", (text) => {
+  if (!turnInProgress) {
+    // Typed input (dashboard Input box) skips listening/speech-start/
+    // transcribing entirely (see engine.ts's runWithText) — this is the
+    // first event of the turn in that case, so it needs the same
+    // fresh-turn treatment the "listening" handler gives the voice path.
+    turnInProgress = true;
+    resetActivityPanel();
+    showActivityPanel();
+  } else {
+    resolveActivityRow(currentRow, { sub: truncate(text, 60) });
+  }
   setOrbState("thinking");
-  beginStage("transcribed");
-  setStepSub("transcribed", truncate(text, 70));
   appendLog("heard", text);
   outputBox.innerHTML = '<span class="output-empty">Proxy is thinking…</span>';
 });
 
+// The four below only fire for the orchestrator path — a regex-matched
+// command goes straight from "transcribed" to "routed"/"reply" with none
+// of these, because a regex hit is a near-instant pattern match, not a
+// decision. Inventing rows for stages that didn't happen would be
+// exactly the fake precision the transparency principle rules out.
+
+window.proxy.on("deciding", (tier) => {
+  resolveActivityRow(currentRow);
+  lastDecidingRow = addActivityRow("Deciding", {
+    sub: tier === "smart" ? "smart tier" : "fast tier",
+    rotateWords: tier === "smart",
+  });
+});
+
+window.proxy.on("tool-start", (name) => {
+  resolveActivityRow(currentRow);
+  addActivityRow(`Executing: ${name}`, { action: true });
+  flashAction();
+});
+
+window.proxy.on("tool-result", ({ name, result }) => {
+  resolveActivityRow(currentRow, { sub: truncate(result, 70) });
+});
+
+window.proxy.on("thinking", (trace) => {
+  attachThinkingTrace(lastDecidingRow, trace);
+});
+
+window.proxy.on("responding", () => {
+  resolveActivityRow(currentRow);
+  addActivityRow("Responding");
+});
+
 window.proxy.on("routed", (info) => {
-  const isAction = info && info.source !== "conversation";
-  beginStage("routed", { action: isAction });
-  setStepSub("routed", describeRoute(info));
-  if (isAction) flashAction();
+  // Orchestrator-path actions already flash via "tool-start" above, per
+  // execution — this covers the regex fast path, which never emits
+  // tool-start at all.
+  if (info && info.source === "regex") flashAction();
   appendLog("routed", describeRoute(info));
 });
 
 window.proxy.on("reply", (text) => {
-  beginStage("reply");
-  setStepSub("reply", truncate(text, 70));
+  resolveActivityRow(currentRow); // resolves "Responding" on the orchestrator path; no-op on the regex path
+  activityFinal.classList.remove("hidden");
+  activityFinalText.textContent = text; // textContent, never innerHTML — model output, never trusted as markup
   appendLog("reply", text);
   outputBox.textContent = text;
 });
 
 window.proxy.on("speaking", () => {
   setOrbState("speaking");
-  beginStage("speaking");
-  setStepSub("speaking", "playing TTS reply");
+});
+
+window.proxy.on("cancelled", () => {
+  resolveActivityRow(currentRow, { stopped: true });
+  appendLog("status", "stopped");
+  // The orchestrator's own honest "Stopped — ..." text still arrives
+  // via the normal "reply" event right after this — nothing more to do
+  // here beyond marking the interrupted row so it doesn't read as done.
 });
 
 window.proxy.on("idle", () => {
+  turnInProgress = false;
   statusDot.classList.remove("active");
-  freezeActiveStage();
+  resolveActivityRow(currentRow); // safety net - nothing should normally still be open here
   statusState.textContent = "Ready";
   if (!errorFlashTimeout) setOrbState("idle");
 });
@@ -355,7 +478,7 @@ window.proxy.on("idle", () => {
 window.proxy.on("error", (message) => {
   statusDot.classList.add("alarm");
   statusState.textContent = "Error";
-  freezeActiveStage();
+  resolveActivityRow(currentRow, { stopped: true, sub: truncate(message, 70) });
   flashError(message);
   appendLog("error", message);
 });

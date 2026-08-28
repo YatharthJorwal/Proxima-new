@@ -265,11 +265,16 @@ pin both resident. Real answer comes from testing on the actual machine
 Ollama's chat API has a native `think` parameter (`true`/`false`/a level),
 and `qwen3.5` models support it — the response comes back with
 `message.thinking` (the actual reasoning trace) separate from
-`message.content`. Plan: fast-tier calls use `think: false` (matches
-"doesn't overthink"); smart-tier calls use `think: true`. The dashboard is
-planned to show this as a real, expandable "thinking" panel tied to the
-current step — the model's actual reasoning trace, not a fabricated "AI is
-thinking..." spinner.
+`message.content`. Fast-tier calls use `think: false` (matches "doesn't
+overthink"); smart-tier calls use `think: true`. **Built, Milestone 9 step
+6**: the dashboard's Activity panel shows this as a real, expandable
+"Show reasoning" toggle on whichever Deciding row produced a trace — the
+model's actual reasoning trace, not a fabricated "AI is thinking..."
+spinner. Shown after the fact rather than streamed live — `chat()` in
+`llm.ts` isn't a streaming call, so there was nothing to stream even if
+the UI wanted to; this resolves what was previously an open detail
+("streamed vs. shown after the fact — decided when this is actually
+built").
 
 ## Milestone 9: personality baseline pulled forward from Milestone 10
 
@@ -283,9 +288,40 @@ rewritten anyway for the two-tier setup, a real personality pass and a
 short static creator bio are shipping as part of Milestone 9 rather than
 waiting for Milestone 10. What stays in Milestone 10 is specifically
 *dynamic*, memory-driven personalization (referencing things Proxy learns
-over time) — Milestone 9 only ships the fixed baseline. The actual
-personality/bio copy is still an open item pending the user's input (see
-`project-status.md`).
+over time) — Milestone 9 only ships the fixed baseline. **The
+personality/bio copy shipped in step 1** — this was an open item early in
+Milestone 9 but is resolved now (see `llm.ts`, and `project-status.md` for
+confirmation it's no longer pending).
+
+## Milestone 9: cancellation shipped narrower than "spoken stop"
+
+The plan (informed by the external architecture review below) called for
+"a minimal way to interrupt a stuck/long-running loop (a second hotkey
+press or spoken 'stop')." What actually shipped, step 6: a second hotkey
+press (Electron), a second Enter press (CLI), or typing the literal word
+"stop" into the dashboard's Input box while busy — all three call
+`ProxyEngine.cancel()`, which forwards to `Orchestrator.cancel()`.
+
+Two deliberate scope decisions inside that:
+
+- **Loop-boundary cancellation, not mid-request.** `cancel()` sets a flag
+  checked only at the top of the orchestrator's next loop iteration — an
+  Ollama call or a tool execution already in flight still runs to
+  completion. True mid-flight abort would need an `AbortController`
+  threaded through the `ollama` client and every tool executor
+  (`dispatchTool`), which is real, separate complexity beyond what "a
+  minimal cancellation path" (the plan's own words) called for. Worth
+  revisiting if real use shows the lag between pressing cancel and it
+  actually taking effect matters in practice.
+- **Typed "stop" instead of true spoken interruption.** Recognizing the
+  word "stop" spoken out loud *while Proxy is still mid-pipeline* would
+  need a second, always-on audio channel running in parallel with the
+  main recording/STT one — a genuinely separate subsystem, not a small
+  addition to the existing one-mic-at-a-time pipeline. Typing "stop" into
+  the dashboard's existing Input box was the practical stand-in: it
+  reaches the same outcome (a way to interrupt a running loop without the
+  hotkey) without inventing new audio infrastructure. The CLI has no
+  typed-text channel at all, so it only gets the second-Enter-press path.
 
 ## Milestone 9: tool schema field additions
 

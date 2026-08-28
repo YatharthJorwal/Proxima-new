@@ -160,86 +160,10 @@ body {
   margin-bottom: 12px;
 }
 
-/* ---------- Pipeline ---------- */
+/* ---------- Utility ---------- */
 
-.pipeline {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.pipeline-step {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-}
-
-.step-mark {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  margin-top: 4px;
-  border: 1px solid var(--hairline);
-  background: transparent;
-  flex: 0 0 auto;
-  transition: background 200ms ease, border-color 200ms ease, box-shadow 200ms ease;
-}
-
-.pipeline-step.active .step-mark {
-  border-color: var(--accent);
-  box-shadow: 0 0 8px var(--accent);
-  animation: pulse-mark 1s ease-in-out infinite;
-}
-
-.pipeline-step.done .step-mark {
-  background: var(--accent);
-  border-color: var(--accent);
-}
-
-.pipeline-step.done.action .step-mark {
-  background: var(--action);
-  border-color: var(--action);
-}
-
-@keyframes pulse-mark {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
-}
-
-.step-body {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.step-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--ink-dim);
-}
-
-.pipeline-step.active .step-label,
-.pipeline-step.done .step-label {
-  color: var(--ink);
-}
-
-.step-sub {
-  font-size: 11px;
-  color: var(--ink-dim);
-  margin-top: 2px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.step-time {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--ink-dim);
-  flex: 0 0 auto;
-  padding-top: 1px;
+.hidden {
+  display: none !important;
 }
 
 /* ---------- Input ---------- */
@@ -437,6 +361,171 @@ body {
   font-size: 11px;
   letter-spacing: 0.08em;
   color: var(--ink-dim);
+}
+
+/* ---------- Activity panel (Milestone 9 step 6) ----------
+   Replaces the old left-column PIPELINE card — see CLAUDE.md's
+   Milestone 9 plan, item 7. Rows are appended live by renderer.js as
+   real events arrive (a plain "hello" ends up 3-4 rows; a chained
+   multi-tool request grows one "Executing" row per loop iteration) —
+   there's no fixed skeleton here, on purpose. */
+
+.activity-card {
+  width: min(400px, 92%);
+  margin-top: 20px;
+  max-height: 40vh;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.activity-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.activity-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.activity-row-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.activity-mark {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-top: 4px;
+  border: 1px solid var(--hairline);
+  background: transparent;
+  flex: 0 0 auto;
+  transition: background 200ms ease, border-color 200ms ease, box-shadow 200ms ease;
+}
+
+.activity-row.active .activity-mark {
+  border-color: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+  animation: pulse-mark 1s ease-in-out infinite;
+}
+
+.activity-row.done .activity-mark {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* A real command actually executing - same amber convention the old
+   Pipeline card used for its action-flash. */
+.activity-row.action .activity-mark {
+  background: var(--action);
+  border-color: var(--action);
+}
+
+.activity-row.action.active .activity-mark {
+  border-color: var(--action);
+  box-shadow: 0 0 8px var(--action);
+}
+
+/* Cancelled or errored mid-run - deliberately distinct from a normal
+   checkmark so an interrupted run doesn't read as a completed one. */
+.activity-row.stopped .activity-mark {
+  background: var(--alarm);
+  border-color: var(--alarm);
+}
+
+@keyframes pulse-mark {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.activity-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.activity-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-dim);
+}
+
+.activity-row.active .activity-label,
+.activity-row.done .activity-label {
+  color: var(--ink);
+}
+
+.activity-sub {
+  font-size: 11px;
+  color: var(--ink-dim);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.activity-time {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-dim);
+  flex: 0 0 auto;
+  padding-top: 1px;
+}
+
+/* Real reasoning trace toggle (smart-tier "thinking" rows only) - shown
+   after the fact, since chat() isn't a streaming call. Not a fabricated
+   "AI is thinking..." spinner; this is the model's actual output. */
+.activity-expand {
+  align-self: flex-start;
+  margin-left: 20px;
+  background: none;
+  border: none;
+  color: var(--accent-2);
+  font-family: var(--sans);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.activity-thinking {
+  margin-left: 20px;
+  padding: 8px 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink-dim);
+  white-space: pre-wrap;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.activity-final {
+  flex: 0 0 auto;
+  margin-top: 12px;
+}
+
+.activity-final-rule {
+  border-top: 1px dashed var(--hairline);
+  margin-bottom: 10px;
+}
+
+.activity-final-text {
+  font-size: 13px;
+  font-style: italic;
+  color: var(--ink);
+  line-height: 1.5;
 }
 
 /* ---------- System status ---------- */

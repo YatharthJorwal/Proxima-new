@@ -8,7 +8,8 @@
     "build": "tsc && node scripts/copy-assets.js",
     "start": "ts-node src/core/assistant.ts",
     "dashboard": "npm run build && electron .",
-    "setup:cv": "node scripts/download-hand-model.js"
+    "setup:cv": "node scripts/download-hand-model.js",
+    "test": "vitest run"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.0.0",
@@ -23,6 +24,7 @@
     "electron": "^43.4.1",
     "three": "^0.185.1",
     "ts-node": "^10.9.2",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "vitest": "^4.1.11"
   }
 }
