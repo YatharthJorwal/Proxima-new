@@ -29,7 +29,10 @@ two-tier orchestrator loop (see "Orchestrator & tool system" below) — as
 of step 6, `engine.ts` calls `orchestrator.ts` instead of the old
 `intentRouter.ts`. The diagram above is the pre-Milestone-9 shape; see
 `project-status.md` for the current wired pipeline and what's still
-pending real-machine confirmation.
+pending real-machine confirmation. Also not shown above: every reply
+(from either the command-match or conversational-reply branch) passes
+through `textForSpeech.ts`'s `normalizeForSpeech()` before the TTS step —
+see that file and `decisions.md` for why.
 
 ## MVP stack (v1, TypeScript/Node)
 
@@ -64,6 +67,10 @@ core/                  (project root — user renamed this from "files/" after M
                          # askProxy/askProxyWithTools kept as back-compat wrappers around it
       stt.ts
       tts.ts            # Piper (default) + optional ElevenLabs upgrade path, reviewed
+      textForSpeech.ts   # normalizeForSpeech() — strips/normalizes emoji, em/en dashes, smart
+                         # quotes before a reply is shown or spoken. Called once in engine.ts's
+                         # process(), not separately at the speak() call. See decisions.md.
+      textForSpeech.test.ts # pure-function tests, npm test.
     commands/           # hardcoded + LLM-routed PC-automation commands
       index.ts          # deterministic regex router (fast path); returns {handler, reply}
       intentRouter.ts   # single-shot LLM tool-calling router (Milestone 5); returns {reply, tool}.
@@ -81,10 +88,25 @@ core/                  (project root — user renamed this from "files/" after M
                          # per tool instead of two copies.
       browse.ts           # Milestone 9 step 3 — "open/search site" via URL templating, no browser
                          # automation. Site -> URL map lives in config/commands.json's "browse" section.
+                         # tryHandleBrowse falls through (returns null) on an unrecognized site
+                         # rather than answering wrong - see project-status.md's Known limitations.
+      browse.test.ts     # regex fallthrough regression tests for tryHandleBrowse, npm test.
       launch.ts           # shared Start-Process launcher, factored out of openApp.ts so browse.ts
                          # can reuse it.
       types.ts          # shared CommandHandler type
-      openApp.ts        # "open/launch/start X" + executeOpenApp()
+      openApp.ts        # "open/launch/start X" + executeOpenApp(). tryHandleOpenApp falls through
+                         # (returns null) on an unrecognized app name rather than answering wrong -
+                         # same reasoning as browse.ts above, see project-status.md.
+      openApp.test.ts    # regex fallthrough regression tests for tryHandleOpenApp, npm test.
+      fileTools.ts       # Milestone 10 Part A — write_file + open_path, sandboxed to
+                         # PROXY_WORKSPACE_DIR (default ~/ProxyWorkspace). See decisions.md.
+      fileTools.test.ts  # sandboxing tests (path traversal, extension allowlists) against a
+                         # real throwaway temp directory, npm test.
+      systemUsage.ts      # Milestone 19 Part A — get_system_usage tool: CPU/RAM + top processes
+                         # via one PowerShell round-trip. First *query* tool (captures stdout),
+                         # not an *action* one like everything above it. See decisions.md.
+      systemUsage.test.ts # PowerShell-JSON parsing tests, incl. the single-item-array quirk,
+                         # npm test.
       volume.ts         # volume up/down/mute + executeVolume()
       window.ts         # maximize/minimize/restore/snap left/right + executeWindow()
     config/
@@ -290,9 +312,41 @@ assuming it's done or not done.
   per tool instead of two copies. Each tool schema carries:
   - `resultInformsNextStep` (default `false`) — true only for a tool whose
     output the model needs to reason about before deciding what's next.
-    None of the current tools (open app, volume, window, browse) need it.
-  - `requiresConfirmation` — built now, unused for now; no current tool is
-    destructive enough to need it, but a future tool can flip it on.
+    None of the current tools (open app, volume, window, browse, file
+    tools) need it.
+  - `requiresConfirmation` — built (Milestone 9 step 5), still unused
+    (Milestone 10 Part A). Nothing in `orchestrator.ts` currently checks
+    this field — setting it on a tool wouldn't actually gate anything yet.
+    Milestone 10 Part A's file tools are safe to ship without it because
+    they're sandboxed (see below), not because this flag covers them;
+    Part B (code execution) is blocked specifically on this gate not
+    existing yet. Full reasoning: `decisions.md`.
+- `fileTools.ts` — Milestone 10 Part A: `write_file` and `open_path`,
+  confined entirely to a dedicated workspace folder
+  (`PROXY_WORKSPACE_DIR`, default `~/ProxyWorkspace`) that Proxy fully
+  owns. `write_file` rejects path traversal/absolute paths and only
+  writes source/content extensions (never anything Windows would execute
+  directly); `open_path` is narrower still — it won't auto-open `.js` or
+  `.py` even though `write_file` can create them, since `Start-Process`
+  on those can run them depending on file associations. This is what
+  makes "write me a game" actually work end to end: `write_file` creates
+  the HTML/JS, `open_path` launches it in the browser via the same
+  `launch()` primitive `open_app`/`browse` use. 10 unit tests
+  (`fileTools.test.ts`) run against a real throwaway temp directory, not
+  mocked fs calls. Full design reasoning: `decisions.md`.
+- `systemUsage.ts` — Milestone 19 Part A: `get_system_usage`, the first
+  *query* tool in this registry (fetches real numbers to reason over,
+  as opposed to every tool above performing an action and reporting
+  success/failure). One PowerShell round-trip (`Get-CimInstance`,
+  `Get-Counter`, `Get-Process`) returns CPU%, memory used/total, and the
+  top 5 processes by memory and by cumulative CPU time as JSON, parsed
+  in Node. "Top by CPU time" is labeled honestly as cumulative processor
+  time since a process started, not a live percentage — Windows doesn't
+  expose reliable per-process instantaneous CPU% as cheaply as memory.
+  5 unit tests cover the parsing, including PowerShell's single-item-
+  array-collapses-to-bare-object quirk. Full reasoning: `decisions.md`.
+  The sidebar's visual "Task Manager" tile (Part B) isn't built yet —
+  blocked on Milestone 14's sidebar navigation existing at all.
 - `orchestrator.ts` — the multi-step loop: LLM proposes a step, step
   executes, result feeds back to the LLM, repeat until it signals done or a
   safety cap is hit (a small ReAct-style agent loop). Includes escalation
@@ -300,11 +354,20 @@ assuming it's done or not done.
   default 5), a `defer_to_planner` signal, and cancellation support. **Wired
   into `engine.ts` as of step 6** — `engine.ts` calls `orchestrator.run()`
   instead of `intentRouter.ts`'s single-shot router now. 11 mocked unit
-  tests (`orchestrator.test.ts`, `npm test`) cover its control flow.
+  tests (`orchestrator.test.ts`, `npm test`) cover its control flow. No
+  changes needed here for Milestone 10 Part A — a compound "write and
+  open" request already triggers `defer_to_planner`'s existing "implies
+  several actions in sequence" guidance, and the smart-tier loop already
+  chains any two tools once escalated, so `write_file` -> `open_path`
+  composes through the existing design with no new orchestrator logic.
 - `browse.ts` / `launch.ts` — "open/search site" via URL templating (no
   browser automation): YouTube's `/results?search_query=`, Google's
   `/search?q=`, etc. `launch.ts` is the shared `Start-Process` launcher
-  factored out of `openApp.ts` so `browse.ts` can reuse it.
+  factored out of `openApp.ts` so `browse.ts` (and now `fileTools.ts`) can
+  reuse it. `tryHandleOpenApp`/`tryHandleBrowse`'s regex fast paths fall
+  through (return `null`) on an unrecognized app/site instead of
+  answering wrong — see `project-status.md`'s Known limitations for the
+  bug this fixed.
 - **Two-tier model routing**: turn 1 of every request goes to a small fast
   model (`qwen3.5:4b`, `think: false`); the loop only escalates to
   `qwen3.5:9b` (`think: true`) for turn 2+ if the request actually needs

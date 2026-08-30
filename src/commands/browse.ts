@@ -96,5 +96,16 @@ export async function executeBrowse(siteRaw: string, query?: string): Promise<st
 export const tryHandleBrowse: CommandHandler = async (text) => {
   const match = text.match(SEARCH_PATTERN);
   if (!match) return null;
+
+  const site = normalizeSite(match[1]);
+  if (!(site in config.browse)) {
+    // Same reasoning as openApp.ts's tryHandleOpenApp: this regex only
+    // fires on the narrow "search X for Y" phrasing, so a miss here
+    // means a genuinely unconfigured (or misheard/typo'd) site name -
+    // let the orchestrator take a shot at a better answer instead of
+    // answering confidently wrong.
+    return null;
+  }
+
   return executeBrowse(match[1], match[2]);
 };

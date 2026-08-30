@@ -37,6 +37,7 @@ import { initSTT, transcribe } from "./stt";
 import { speak } from "./tts";
 import { recordUntilSilence } from "./audioUtils";
 import { ModelTier } from "./llm";
+import { normalizeForSpeech } from "./textForSpeech";
 import { tryHandleCommand, RegexCommandResult } from "../commands";
 import { Orchestrator } from "../commands/orchestrator";
 
@@ -251,6 +252,14 @@ export class ProxyEngine extends EventEmitter {
       );
       reply = result.reply;
     }
+
+    // Applied once, here, regardless of which path produced the reply -
+    // not separately at the speak() call below. Keeps what's displayed
+    // (the "reply" event, the Activity panel's final quote, the session
+    // log) and what's actually spoken identical. See textForSpeech.ts's
+    // docblock for why this exists and why it isn't just a system-prompt
+    // instruction.
+    reply = normalizeForSpeech(reply);
 
     this.emit("reply", reply);
     this.emit("speaking");

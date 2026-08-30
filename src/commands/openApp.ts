@@ -77,5 +77,25 @@ export async function executeOpenApp(appNameRaw: string): Promise<string> {
 export const tryHandleOpenApp: CommandHandler = async (text) => {
   const match = text.match(OPEN_PATTERN);
   if (!match) return null;
+
+  const requested = normalize(match[1]);
+  if (!(requested in config.openApp)) {
+    // Not a known app name — don't answer confidently wrong. This regex
+    // is broad on purpose ("open " + anything), which means it was
+    // grabbing things it had no business claiming: "open chrome and open
+    // youtube" (compound - two actions), "open youtube on chrome and
+    // search for pewdiepie" (compound + a browse-shaped request), "open
+    // github" (a website, not an app - github.com is in browse.ts's
+    // config, but this regex ran first and never gave that a chance).
+    // Returning null here instead of a canned failure lets the router
+    // chain (and past it, the orchestrator, which has both open_app and
+    // browse and can reason about phrasing this fixed regex can't) take
+    // a real shot instead. A genuine unknown-app miss still ends up with
+    // an honest "not set up" reply either way - just reached through
+    // executeOpenApp() below, once something (regex or the orchestrator)
+    // is actually confident this is an open_app request specifically.
+    return null;
+  }
+
   return executeOpenApp(match[1]);
 };

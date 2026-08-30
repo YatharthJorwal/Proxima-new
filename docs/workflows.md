@@ -38,6 +38,13 @@ assistant.
   `orchestrator.run()`. `orchestrator.ts` itself has its own internal
   default (5) so it stays independently usable/testable without
   `engine.ts` or a `.env` file.
+- `PROXY_WORKSPACE_DIR` (default `~/ProxyWorkspace`) — Milestone 10 Part A.
+  Where `write_file`/`open_path` are sandboxed to. Read directly in
+  `fileTools.ts`, same pattern as `config/commands.json`'s path in
+  `openApp.ts`/`browse.ts` — not routed through `engine.ts`, since this is
+  a tool module's own resource rather than pipeline behavior. Worth
+  confirming this default is actually where you want generated files to
+  land before testing Part A for real.
 
 ## Verification workflow (sandbox vs. real machine)
 

@@ -395,3 +395,388 @@ point against the actual code rather than taken at face value:
   right-sized seed to grow from when a genuinely dangerous tool shows up,
   not before. A generalized plugin SDK — the review flags this as
   premature itself; agreed.
+
+## Milestone 9 (post-wiring): regex fast path answering confidently wrong instead of falling through
+
+Found in real-machine testing, after step 6 landed: `open_app`'s regex
+fast path (`OPEN_PATTERN` in `openApp.ts`, matches any "open X" phrase)
+was intercepting requests it had no business claiming — a compound
+request ("open chrome and open youtube"), a request for a real,
+configured `browse.ts` site with no app equivalent ("open github") — and
+answering with a canned "I don't have X set up to open yet" instead of
+returning `null` and letting the router chain (regex → the orchestrator)
+take a real shot. Root cause was structural: this regex handler runs
+before any LLM is ever consulted, and previously treated "not in
+`commands.json`" as a confident terminal answer rather than "not
+confidently mine, let something smarter try."
+
+**Fix**: `tryHandleOpenApp` (and `tryHandleBrowse`, same pattern, same
+bug) now checks whether the extracted name is actually a known key
+*before* calling `executeOpenApp`/`executeBrowse` — if not, returns `null`
+instead of the canned string. `executeOpenApp`/`executeBrowse` themselves
+are unchanged and still return that same canned message when genuinely
+appropriate — once *something* (a regex match or an explicit orchestrator
+tool call) is actually confident this was an open_app/browse request
+specifically, honesty requires saying plainly it's not configured, same
+principle as before. The only thing that changed is which layer gets to
+decide *that* confidently.
+
+**Why not just special-case "and" or other compound-phrase markers in the
+regex instead?** That would only patch the compound-request symptom, not
+the actual root cause — "open github" isn't compound at all, and would
+still have failed. The `null`-on-miss fix handles all three logged
+failure cases (two compound, one single-app-that's-actually-a-website)
+uniformly, because it's fixing the actual thing that was wrong: a
+"not found" outcome getting treated as "definitely can't be done" instead
+of "not confidently my command."
+
+**Also done in the same patch**: strengthened `open_app`'s tool
+description (`tools.ts`) to explicitly say it's for desktop apps, not
+websites, and to point at `browse` for those — a small, direct nudge at
+the exact ambiguity ("github" being a plausible-sounding "app name" to a
+model that hasn't been told otherwise) that caused one of the three
+logged failures. This doesn't guarantee correct tool selection every
+time — that's a genuine model-reliability question, not a structural bug,
+and is tracked as an open question in `project-status.md`, to be checked
+during Milestone 9 step 7's real-machine testing.
+
+**What this is not**: a fix for tool-calling reliability in general. The
+user's stated larger goal — more ambitious tasks (writing and running
+code, pulling in external data) — is a different, much larger scope,
+being discussed separately rather than folded into this patch.
+
+## Milestone 10 Part A: file tools shipped without a confirmation gate — why that's a defensible line, not a shortcut
+
+Prompted by a direct conversation about scope: the user wants Proxy to
+eventually write and run code on request ("make me Flappy Bird" should
+produce an actual working game, not a refusal or a hallucinated
+non-answer), and was explicit that data-exfiltration risk isn't a concern
+since the whole system is local-only. Worth separating two different
+risks explicitly, since "it's local" only addresses one of them:
+
+- **Exfiltration risk** (data leaving the machine) — genuinely
+  near-zero here; nothing about these tools makes a network call.
+- **Destructive-local-action risk** (the tool does something harmful *to
+  this machine*) — orthogonal to locality entirely. A local script with
+  real filesystem/process access can damage things just as easily as a
+  remote one; "it never leaves my PC" doesn't make an `rm -rf` equivalent
+  safe.
+
+Milestone 10 Part A (`write_file`, `open_path` — see `fileTools.ts`)
+is scoped specifically to avoid the second risk without needing a
+confirmation gate at all, rather than building the gate first:
+
+- **Everything is confined to one folder Proxy fully owns**
+  (`PROXY_WORKSPACE_DIR`, default `~/ProxyWorkspace`), not the general
+  filesystem. `resolveInWorkspace()` rejects absolute paths and any `..`
+  traversal — there's no path a model-supplied string can construct that
+  lands outside that folder.
+- **`write_file` can't create anything Windows would run on its own** —
+  the extension allowlist is source/content types only
+  (`.html/.js/.css/.json/.md/.txt/.csv/.svg/.py`), explicitly excluding
+  `.exe/.bat/.cmd/.ps1/.vbs/.scr/.msi/.com/.jar/.lnk/.reg/.dll`.
+- **`open_path` is narrower than `write_file`, on purpose** — it won't
+  auto-open a `.js` or `.py` file even though `write_file` is happy to
+  create one. Depending on a machine's file associations, `Start-Process`
+  opening a `.js` file can run it via the Windows Script Host (a real,
+  well-known malware vector, not a hypothetical), and similarly for `.py`
+  if a Python launcher owns that file association. Writing inert source
+  code to a sandboxed folder is fine; auto-launching it through whatever
+  the OS decides to do with that extension is a different thing entirely.
+  A `.js`/`.py` file Proxy wrote can still be opened by the user manually
+  if they want — same as any file that landed on their disk from anywhere
+  else — Proxy just won't be the one that pulls that trigger.
+
+This means Flappy Bird (or any browser-viewable HTML/CSS/JS output)
+actually works end to end today: write the file, `open_path` launches it
+in the default browser. It does *not* mean "write me a Python script and
+run it" works — that needs actual process execution, which is Part B, and
+Part B is deliberately not built yet.
+
+**Why Part B (`run_script`) is blocked on a confirmation mechanism that
+doesn't exist, rather than shipped the same way**: sandboxing plus an
+extension allowlist works for Part A because neither tool can execute
+anything — the worst case is an inert file sitting in a folder. Actually
+running code is a different risk shape entirely: even confined to
+`node`/`python` on a workspace-relative path (not an arbitrary shell
+string — that's off the table regardless), a script *executing* can do
+things a script merely *existing* cannot. `tools.ts`'s
+`requiresConfirmation` field has existed since Milestone 9 step 5
+specifically for this — but nothing in `orchestrator.ts` currently checks
+it. Shipping `run_script` with that flag set, when nothing enforces it,
+would be worse than not having the flag: it would look safe in the
+schema without actually being gated. Real design work needed before Part
+B: does confirmation happen by voice ("say yes to run it"), a dashboard
+button, does the orchestrator loop actually pause mid-run and wait — none
+of that is decided yet, and it shouldn't be decided implicitly by
+shipping around it.
+
+## TTS text normalization: prompt nudge + deterministic backstop, not either alone
+
+Found in real-machine testing: the LLM would produce emoji, em/en dashes,
+and smart quotes in replies, and Piper (the local TTS model) genuinely
+struggles with them — not just an awkward pause, garbled or dropped audio
+right on the character. The user's own framing was exactly right: "Proxy
+is primarily a TTS model" — every reply gets spoken, so text that reads
+fine but speaks badly is a real defect, not a cosmetic one.
+
+Two layers, same reasoning already used for the regex-fallthrough fix and
+the earlier hallucination fix — a prompt instruction is a strong nudge,
+not a guarantee, so don't rely on one alone for something that actually
+needs to be true every time:
+
+1. **`llm.ts`'s PERSONALITY prompt** now explicitly says "no emoji, no em
+   dashes or smart quotes - plain words and plain punctuation only,"
+   alongside the existing "no markdown" instruction. Best case, the model
+   just doesn't produce these in the first place.
+2. **`textForSpeech.ts`'s `normalizeForSpeech()`** is the deterministic
+   backstop — applied in `engine.ts`'s `process()`, once, regardless of
+   whether the prompt was followed. Strips emoji (including ZWJ compound
+   sequences and flag pairs, not just single-codepoint ones), converts
+   em/en dashes to a comma (a natural spoken pause instead of a
+   character Piper stumbles on), normalizes smart/curly quotes and
+   guillemets to straight ones, and converts the ellipsis character to
+   three periods.
+
+**Targeted, not broad.** This is a specific list of known-troublesome
+characters, not "strip anything non-ASCII" — that would also mangle
+legitimate text Piper actually handles fine (an accented name, "café",
+"Zürich"). Only characters actually found causing problems are touched.
+
+**Applied once, to both displayed and spoken text, not separately at the
+TTS call site.** The alternative — clean a copy only for `speak()`, leave
+the original for the "reply" event/Activity panel/session log — would
+mean what's shown and what's actually said could quietly drift apart
+(an em dash visible on screen, a comma heard out loud). Given this
+project's own transparency principle already treats "what you see is
+what happened" as non-negotiable elsewhere (the Activity panel's whole
+design, the "never claim a tool ran when it didn't" rule), keeping the
+displayed and spoken text identical was the more consistent call, even
+though it means the dashboard log loses a little typographic polish
+("word, word" instead of "word — word"). Regex-matched replies
+(`openApp.ts`, etc.) pass through the same normalization too, even though
+they're already plain ASCII by construction — a no-op for those today,
+but one code path instead of two, and free defense-in-depth if a future
+hardcoded reply string ever picks up a stray curly quote from a
+copy-paste.
+
+**Terminology note, since it affects where a future fix would actually
+go**: the user described this as "whisper struggling" — worth being
+precise that this is a TTS (Piper, spoken output) issue, not an STT
+(Whisper, transcribing what the user says) one. There's no code path
+where LLM-generated text ever reaches Whisper; Whisper only ever
+processes microphone audio. Whisper's own, separate mishearing issues are
+tracked under Milestone 15 in `project-status.md`, unrelated to this fix.
+
+## Milestone 10 Part C / Milestone 16: external data + iPhone integration — feasibility researched, not assumed
+
+Prompted by the user naming specific real sources (Groww, Screener.in,
+Apple Stocks, iPhone messages/WhatsApp/Gmail, remote iPhone control) and
+asking for an honest assessment before committing anything to the
+roadmap. Searched current information for each rather than relying on
+possibly-stale assumptions, since asserting something is buildable when
+it isn't (or vice versa) into a living roadmap doc is worse than not
+having researched it at all.
+
+**Stock data:**
+- **Groww** has a real, official Trading API now (₹499/month
+  subscription) — portfolio/holdings, live market data, historical data,
+  order management. This is a genuine, well-documented REST API, not a
+  scrape or a workaround. Straightforward to build against.
+- **Screener.in** has no official API. Third-party scraping services
+  (Apify actors, Parse.bot, and similar) provide structured access to its
+  data for a small per-request fee - real and usable, but it's worth
+  being clear this is an unofficial middleman scraping Screener.in on
+  your behalf, not something Screener.in itself provides or guarantees
+  will keep working.
+- **Apple's Stocks app** isn't a real integration target at all - Apple
+  doesn't expose it to third parties in any way. "Stock data on the PC"
+  means a real market-data API (Groww, or a standard one like Alpha
+  Vantage/Finnhub for symbols outside Groww holdings), not pulling from
+  the phone's own Stocks app - there's no path for that regardless of
+  effort spent.
+
+**Gmail**: official Gmail API, standard OAuth2. No caveats - this is the
+easy one, same shape as any other well-documented external API
+integration.
+
+**iPhone messages and remote control** - a genuinely different problem
+shape than the above, because it's Apple's device/automation ecosystem
+(Shortcuts, push notifications), not a REST API:
+- **Reading SMS/iMessage**: iOS Shortcuts Automations can forward
+  incoming SMS to a webhook URL - real, documented, used by others for
+  exactly this. The direction only goes one way: the *phone pushes to
+  Proxy* when a message arrives; Proxy has no way to reach out and pull
+  message history on demand, since Apple doesn't expose that. Needs Proxy
+  to expose a reachable endpoint (fine on the same WiFi at home; needs a
+  tunnel like ngrok or Cloudflare Tunnel to receive messages while away)
+  and a Shortcuts Automation configured on the phone per message type.
+  iMessage-specific forwarding (vs. plain SMS) is less well-supported by
+  Shortcuts than SMS is.
+- **WhatsApp**: genuinely not recommended. No official API exists for a
+  personal account to read its own chat history. The only real options
+  are (a) unofficial libraries (e.g. whatsapp-web.js-style tools) that
+  automate a logged-in WhatsApp Web session - this violates WhatsApp's
+  Terms of Service and carries a real risk of the account getting banned,
+  not a hypothetical one, or (b) the official WhatsApp Business API,
+  which is built for a business messaging customers at scale and isn't
+  designed for (and may not even cleanly support) a personal account
+  reading its own personal chats. Recommendation: don't build this one
+  unless WhatsApp ships something official for it.
+- **Remote-triggering something on the iPhone** (e.g. "open Safari"):
+  feasible through a third-party bridge app - Pushcut is the concrete,
+  widely-used example. Proxy sends an HTTP request, Apple's push
+  infrastructure delivers it to the phone, a pre-built Shortcut runs.
+  Real and working, but it's not "control the iPhone" in general - it's
+  a small number of specific actions, each requiring its own Shortcut
+  built ahead of time on the phone, plus that bridge app installed and
+  configured. A real dependency outside Proxy's own control, not
+  something Proxy alone can set up end-to-end.
+- **Unlocking the iPhone remotely**: not feasible, and this didn't need
+  deep research to conclude - Apple deliberately does not expose any way
+  to unlock a device remotely, through Shortcuts, an API, or anything
+  else. That's a intentional security boundary, not a gap that's likely
+  to open up. Not worth revisiting unless Apple's own position changes.
+
+**Bottom line recommendation, if Milestone 16 gets prioritized**: the
+SMS-to-webhook path is the one actually worth building - real, no ToS
+risk, and it directly covers "new message from a client." Safari-via-
+Pushcut is a fun proof of concept but low standalone value. WhatsApp and
+remote-unlock are not recommended pursuits given the above, not because
+of low effort tolerance but because the honest options for each are
+either unsupported or genuinely risky.
+
+## Milestones 17-20: four more future items, weighed for feasibility before logging
+
+A further scoping conversation, this time covering: Windows packaging/
+auto-startup, a double-clap activation trigger, a Task-Manager-style
+system monitor Proxy can talk about, and a 3D modeling assistant ("a
+personalized Blender," explicitly the user's biggest ambition for this
+project, MCU Tony Stark-inspired). Per-milestone detail lives in
+`project-status.md`; this entry is the cross-cutting reasoning.
+
+**Clarified, not built**: the hotkey already works regardless of which
+app has focus (games included) - this came up as a request but is
+existing behavior (`globalShortcut` is OS-level), not a gap. Worth
+recording so it doesn't get re-asked-for as if it were missing.
+
+**Packaging + auto-launch (Milestone 17)**: genuinely easy when it
+happens. `electron-builder`/`electron-forge` for a real installer,
+`app.setLoginItemSettings()` (built into Electron) for startup - no
+registry-editing workaround needed for either piece.
+
+**Double-clap trigger (Milestone 18)**: a smaller cousin of Milestone 8's
+VAD technically (amplitude-spike detection, same family), but with one
+real architectural difference worth naming plainly rather than glossing
+over: VAD only listens once triggered; this needs a mic stream open
+continuously in the background. Not a meaningful privacy concern the way
+it's scoped (discarding audio immediately, never transcribing or storing
+unless the actual clap pattern fires), but a genuine difference from how
+the pipeline works today, and false-positive tuning will need real
+calibration work, same as VAD's threshold did.
+
+**System monitor (Milestone 19)**: the easiest new capability of the
+four. The insight worth recording: a live-usage tile alone is just a
+prettier Task Manager - the actual value is the orchestrator tool
+(`Get-Process`/`Get-Counter` via PowerShell, same pattern already used
+throughout `commands/`) that lets Proxy answer "what's eating my RAM" in
+words. Shipping the tile without the tool would miss the actual point of
+the request.
+
+**3D modeling assistant (Milestone 20)**: the one that needed the most
+honesty. Broken into four phases specifically because they sit at very
+different points on the "how solved is this" spectrum - viewing (easy,
+Three.js already a dependency), basic parametric editing with gizmos and
+boolean ops (real and scoped, existing web tooling covers it), AI
+description/critique of a model via rendered views + a vision model
+(realistic), and AI *generating* a model from a text description (not
+promised - local text-to-3D generation with the geometric precision 3D
+printing needs, watertight/manifold meshes, is not a solved problem
+today, and packaging it as a committed deliverable rather than an open
+research attempt would be overpromising). Positioned as the last
+milestone at the user's own request, and the phasing itself is the
+recommendation for how to approach it when the time comes: 1-3 first,
+each de-risking the next, 4 attempted last and framed as research, not
+a promise.
+
+## Milestones 21-22 + personality tone: three more requests, one turned out categorically different
+
+**News window (Milestone 21)**: genuinely easy relative to everything
+else discussed - RSS needs no API key/signup, personalization is a good
+LLM task (filter/summarize headlines against known interests), the
+window itself is a standard second Electron `BrowserWindow`. Real
+dependency worth naming: true "it knows my interests" personalization
+needs Milestone 10 Part D (memory) first; ships in a simpler
+static-interest-list form until then.
+
+**Phone calling (Milestone 22)**: verified current before writing this
+down, not assumed - Twilio's Media Streams is confirmed as the standard
+way to bridge a real phone call to a WebSocket server for real-time
+bidirectional audio, and the existing local pipeline (Whisper/
+orchestrator/Piper) could sit behind that in principle. Flagged
+prominently as the first item across this whole roadmap that isn't "more
+capability on the local foundation" - it necessarily requires a cloud
+telephony provider (no way around this for real PSTN access), costs real
+money per minute on an ongoing basis, and requires the PC to be reachable
+from the internet if calls are meant to reach the user while away from
+home. Not a rejection - the user gets to weigh a real tradeoff with
+accurate information, same principle as every other feasibility
+assessment in this document. Recommendation: user-initiated calls only,
+first - Proxy deciding on its own when a call is warranted is a
+materially harder and easier-to-get-wrong UX problem than the plumbing
+underneath it, and shouldn't be bundled in as if it were the same size
+of decision.
+
+**FRIDAY/JARVIS tone ("call me sir")**: explicitly NOT scoped as a
+milestone - it's a few lines in `llm.ts`'s existing `PERSONALITY`
+constant, no new capability, no research needed. Recorded here only so
+it doesn't get lost, not because it needed feasibility analysis.
+
+## Milestone 19 Part A: query tools are a new shape, not just another action tool
+
+`get_system_usage` is the first *query* tool in this codebase - every
+tool before it (`open_app`, `volume`, `window`, `browse`, the file
+tools) performs an action and reports whether it worked; this one's
+entire purpose is fetching real numbers for the model to reason over and
+relay. That distinction mattered enough to change the implementation
+shape: `volume.ts`/`window.ts`/`openApp.ts` all spawn a PowerShell script
+via `spawn()` and just wait for it to exit (`ps.on("close", ...)`) -
+none of them need the script's output. `systemUsage.ts` captures stdout
+and parses JSON out of it, a pattern this codebase hadn't needed until
+now.
+
+**Split into Part A (tool) and Part B (sidebar tile) as soon as it was
+actually scoped**, not planned that way in advance - the tile depends on
+Milestone 14's sidebar navigation existing, which it doesn't yet; the
+tool has no such dependency. Shipping Part A alone means "what's eating
+my RAM" already works through voice or the dashboard's Input box today,
+rather than waiting on unrelated dashboard work to land first.
+
+**One PowerShell round-trip, not several** - CPU%, memory totals, and
+top-5-by-memory and top-5-by-CPU-time all come back in one JSON blob,
+rather than issuing `Get-Process`/`Get-Counter`/`Get-CimInstance`
+separately and stitching results together in Node. Cheaper, and avoids
+any window where the numbers could be sampled at slightly different
+moments.
+
+**"Top by CPU time" is honestly labeled as cumulative, not live.**
+Windows doesn't expose reliable per-process instantaneous CPU% as
+cheaply as it does memory - getting a true live percentage would need
+sampling a counter over an interval per process, meaningfully more
+complex than this tool's one-shot query. `Get-Process`'s `CPU` property
+(total processor time used since the process started) was the pragmatic
+choice for v1, but presenting it as "what's using your CPU right now"
+would be a plausible-but-wrong answer - a browser open for three days
+will always top a cumulative-time list regardless of what's actually
+busy at the moment asked. The tool's reply text says "total CPU time
+used since they started, not necessarily busy right now" explicitly,
+so the model relays that framing accurately instead of the more
+misleading (and more expected-sounding) "these are hogging your CPU."
+
+**Test coverage exercises a real PowerShell serialization quirk on
+purpose**: `ConvertTo-Json` collapses a single-element array to a bare
+object rather than a one-item array - genuine PowerShell behavior, not a
+hypothetical edge case, and exactly the kind of thing that would only
+surface on a machine with very few processes matching a filter, easy to
+miss without a dedicated test for it. `asArray()`'s normalization and
+its test both exist specifically because of this.

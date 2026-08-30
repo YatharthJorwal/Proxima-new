@@ -18,6 +18,8 @@ import { executeOpenApp } from "./openApp";
 import { executeVolume, VolumeDirection } from "./volume";
 import { executeWindow, WindowAction } from "./window";
 import { executeBrowse, getBrowseSites } from "./browse";
+import { executeWriteFile, executeOpenPath } from "./fileTools";
+import { executeGetSystemUsage } from "./systemUsage";
 
 export interface ProxyTool {
   /** The LLM-facing schema — name, description, parameters. Sent to Ollama as-is. */
@@ -57,7 +59,8 @@ export const TOOLS: Record<string, ProxyTool> = {
       type: "function",
       function: {
         name: "open_app",
-        description: "Open, launch, or start an application on the user's PC by name.",
+        description:
+          "Open, launch, or start a DESKTOP application already installed on the user's PC, by name (e.g. 'discord', 'chrome', 'notepad'). For a WEBSITE (YouTube, GitHub, Google, etc.) use the browse tool instead, even if it was phrased as 'open X' - browse knows the real list of configured sites; this tool doesn't.",
         parameters: {
           type: "object",
           properties: {
@@ -148,6 +151,79 @@ export const TOOLS: Record<string, ProxyTool> = {
     },
     execute: async (args) =>
       executeBrowse(String(args.site ?? ""), args.query ? String(args.query) : undefined),
+  },
+
+  // Milestone 10 Part A — see fileTools.ts's docblock for the full
+  // sandboxing story (workspace-folder confinement, extension
+  // allowlists, why open_path won't touch .js/.py). Neither tool is
+  // flagged requiresConfirmation: that field exists but nothing enforces
+  // it yet (see the field's own docs above) - sandboxing is what keeps
+  // these two safe to ship now, not a confirmation gate. A real
+  // requiresConfirmation-honoring tool (like a future run_script) needs
+  // that gate built first.
+  write_file: {
+    schema: {
+      type: "function",
+      function: {
+        name: "write_file",
+        description:
+          "Write text content to a file in Proxy's own workspace folder (not the general filesystem) - source code, HTML/CSS/JS, notes, data files. Use a relative path like 'flappybird.html' or 'games/snake.js'. To actually show the result to the user afterward, call open_path next.",
+        parameters: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Relative path within the workspace, e.g. 'flappybird.html'. No absolute paths, no '..'.",
+            },
+            content: {
+              type: "string",
+              description: "The full file content to write.",
+            },
+          },
+          required: ["path", "content"],
+        },
+      },
+    },
+    execute: async (args) => executeWriteFile(String(args.path ?? ""), String(args.content ?? "")),
+  },
+
+  open_path: {
+    schema: {
+      type: "function",
+      function: {
+        name: "open_path",
+        description:
+          "Open a file that already exists in Proxy's own workspace folder, using its default viewer (e.g. an .html file opens in the browser). Only for files Proxy itself wrote via write_file - not for opening arbitrary files elsewhere on the PC (use open_app for that).",
+        parameters: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Relative path within the workspace, e.g. 'flappybird.html'.",
+            },
+          },
+          required: ["path"],
+        },
+      },
+    },
+    execute: async (args) => executeOpenPath(String(args.path ?? "")),
+  },
+
+  // Milestone 19 Part A — the first query tool (fetches real numbers to
+  // reason over), as opposed to every tool above it, which performs an
+  // action. See systemUsage.ts's docblock for why that distinction
+  // mattered for how it's implemented.
+  get_system_usage: {
+    schema: {
+      type: "function",
+      function: {
+        name: "get_system_usage",
+        description:
+          "Check current CPU and memory (RAM) usage, and which processes are using the most - e.g. 'what's eating my RAM', 'how's my CPU doing', 'what's using all my memory'. Takes a moment to run (queries Windows directly). No arguments needed.",
+        parameters: { type: "object", properties: {} },
+      },
+    },
+    execute: async () => executeGetSystemUsage(),
   },
 };
 
