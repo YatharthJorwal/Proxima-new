@@ -2,14 +2,13 @@
  * Task orchestration loop — Milestone 9, build order step 4.
  *
  * This is the piece that turns Proxy from "one tool call per utterance"
- * into a real multi-step agent. It does NOT replace intentRouter.ts yet —
- * that swap (engine.ts calling this instead) is build order step 6, along
- * with the Activity panel that visualizes the events this module emits.
- * Built standalone first, deliberately, so it could be exercised by
- * step 5's unit tests without needing engine.ts, a mic, or real Ollama —
- * see CLAUDE.md's Milestone 9 plan section 8 for the full build order.
- * Step 6 is what actually calls this from engine.ts now, replacing the
- * old single-shot intentRouter.ts call.
+ * into a real multi-step agent. Built standalone first, deliberately, so
+ * it could be exercised by step 5's unit tests without needing engine.ts,
+ * a mic, or real Ollama — see CLAUDE.md's Milestone 9 plan section 8 for
+ * the full build order. Step 6 is what wired this into engine.ts,
+ * replacing the old single-shot intentRouter.ts call (that file has
+ * since been deleted — see decisions.md); Milestone 9 as a whole is now
+ * confirmed working on the real machine (project-status.md).
  *
  * Shape, per that plan (section 1):
  *   1. Turn 1 always goes to the FAST tier (qwen3.5:4b, think: false),

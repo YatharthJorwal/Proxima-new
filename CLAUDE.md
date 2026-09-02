@@ -63,12 +63,26 @@ webcam hand-tracking slice. Full stack table, diagrams, and directory
 layout: `docs/architecture.md`.
 
 ## Current status (short version)
-Milestones 1–8 (audio pipeline, STT, hardcoded commands, TTS, LLM intent
-routing, dashboard, first CV slice, VAD) are built and confirmed working on
-the user's real machine. Milestone 9 (task orchestration / multi-step tool
-calling) is in progress — steps 1-6 of 7 built (including engine wiring and
-the dashboard's Activity panel), step 7 (real-machine test cases) is what's
-left. See `docs/project-status.md` for the full breakdown.
+Milestones 1–9 (audio pipeline, STT, hardcoded commands, TTS, LLM intent
+routing, dashboard, first CV slice, VAD, task orchestration) are built and
+confirmed working on the user's real machine. Milestone 10 (agentic
+capabilities) is in progress: Parts A and B (file tools; code execution/
+run_script, including its confirmation mechanism) confirmed working on
+the real machine; Part C (external data) has a Gmail query tool built,
+pending a real .env/setup fix (real-machine test returned "not
+connected"); Part D (memory) has an automatic-capture slice built,
+pending real-machine confirmation, and gesture-to-action wiring (the
+other Part D item) still not started/scoped at all — this is what's
+actually left before Milestone 10 as a whole is done. Milestone 13
+(settings + persistent session log) is in progress: session log
+persistence built, not yet real-machine tested; the settings UI half has
+a real open design question (live-apply vs. restart-to-apply) awaiting
+the user's call before it's started. Milestone 19 Part A
+(system usage query tool) is also confirmed working. Known open issue,
+deferred by request: the fast tier appears to never escalate to the
+smart tier in practice (see project-status.md's
+Known Limitations) — informed two of Part D's design choices. See
+`docs/project-status.md` for the full breakdown.
 
 ## Documentation
 - `docs/architecture.md` — the pipeline, stack table, directory structure,

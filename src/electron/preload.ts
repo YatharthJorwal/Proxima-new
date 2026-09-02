@@ -6,12 +6,13 @@
  * here via contextBridge.
  *
  * Deliberately narrow: the renderer can listen to proxy:* events (via
- * `on`), and can submit typed text (via `submitText`) — that's it. No
- * generic "invoke any channel" passthrough, no filesystem/process access.
- * submitText goes out over ipcRenderer.send to a single fixed channel;
- * main.ts (see wireRendererCommands) is what actually validates and acts
- * on it, so preload's job here is just "don't expose more than this one
- * verb."
+ * `on`), submit typed text (via `submitText`), and mirror a log line it
+ * already rendered back for persistence (via `persistLogEntry`, Milestone
+ * 13) — that's it. No generic "invoke any channel" passthrough, no
+ * filesystem/process access. Each verb goes out over ipcRenderer.send to
+ * a single fixed channel; main.ts is what actually validates and acts on
+ * it, so preload's job here is just "don't expose more than these three
+ * verbs."
  */
 
 import { contextBridge, ipcRenderer, IpcRendererEvent } from "electron";
@@ -45,11 +46,21 @@ const CHANNELS = [
   "thinking",
   "responding",
   "routed",
+  // Milestone 10 Part B — fires right after run_script asks for
+  // confirmation; the resolution itself arrives via the existing
+  // "routed" event (source: "confirmation") on the next turn.
+  "awaiting-confirmation",
   "reply",
   "speaking",
   "cancelled",
   "idle",
   "error",
+  // Milestone 13 — sent once at startup (after the page finishes
+  // loading, same "wait for did-finish-load" fix as "ready" — see
+  // main.ts) with the persisted session log from previous runs, so the
+  // dashboard's SESSION LOG card doesn't reset to empty on every
+  // relaunch.
+  "log-history",
 ] as const;
 
 type ProxyChannel = (typeof CHANNELS)[number];
@@ -68,5 +79,15 @@ contextBridge.exposeInMainWorld("proxy", {
   submitText: (text: string) => {
     if (typeof text !== "string") return;
     ipcRenderer.send("proxy:submit-text", text);
+  },
+  // Milestone 13 — the renderer already knows exactly what it's showing
+  // in the SESSION LOG card (appendLog() in renderer.js) and how it's
+  // worded (describeRoute() etc. live there too) - this just mirrors
+  // that same {kind, text} pair to main.ts for persistence, rather than
+  // having main.ts try to reconstruct the same formatting independently
+  // and risk the two drifting apart.
+  persistLogEntry: (kind: string, text: string) => {
+    if (typeof kind !== "string" || typeof text !== "string") return;
+    ipcRenderer.send("proxy:persist-log-entry", { kind, text });
   },
 });

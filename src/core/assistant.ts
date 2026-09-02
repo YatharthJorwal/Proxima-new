@@ -30,6 +30,10 @@ function describeRoute(info: RouteInfo): string {
       return `LLM tool call (${info.tools.join(", ")})`;
     case "conversation":
       return "plain conversation (no command matched)";
+    case "confirmation":
+      // Milestone 10 Part B — the follow-up turn that resolves a
+      // run_script confirmation request. See runScript.ts's docblock.
+      return info.confirmed ? "run_script confirmation (confirmed)" : "run_script confirmation (cancelled)";
   }
 }
 
@@ -48,6 +52,10 @@ engine.on("tool-result", (name, result) => console.log(`(${name} -> ${result})`)
 engine.on("thinking", (trace) => console.log(`(reasoning trace)\n${trace}\n`));
 engine.on("responding", () => console.log("(putting together a reply...)"));
 engine.on("routed", (info) => console.log(`Routed via: ${describeRoute(info)}`));
+// Milestone 10 Part B — the reply text right after this already says
+// "say yes/no", so this line is just a heads-up that the CLI is now
+// waiting on that, not new information the reply doesn't already carry.
+engine.on("awaiting-confirmation", (info) => console.log(`(awaiting confirmation: run ${info.path})`));
 engine.on("reply", (text) => console.log(`Proxy: ${text}`));
 engine.on("speaking", () => console.log("Speaking..."));
 engine.on("cancelled", () => console.log("(stopped)"));

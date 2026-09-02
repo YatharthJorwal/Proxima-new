@@ -14,15 +14,27 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import * as os from "os";
 
-const TEST_WORKSPACE = path.join(os.tmpdir(), `proxy-workspace-test-${Date.now()}`);
-
-const { mockLaunch } = vi.hoisted(() => ({ mockLaunch: vi.fn() }));
+// process.env.PROXY_WORKSPACE_DIR must be set before fileTools.ts's
+// module-level WORKSPACE_ROOT constant is computed. Set inside
+// vi.hoisted()'s callback rather than as a plain statement below -
+// found during Milestone 10 Part B's work that the plain-statement
+// version of this exact pattern was silently NOT taking effect in this
+// file specifically (this file already has a vi.mock for "./launch"),
+// meaning every test run here was actually writing into the real
+// ~/ProxyWorkspace on whichever machine ran it, not the throwaway temp
+// dir the assertions below appear to describe. The tests still passed
+// throughout, because they compare the written path against
+// getWorkspaceRoot() on both sides - a self-referential check that
+// can't catch getWorkspaceRoot() itself being wrong. See decisions.md
+// for the fuller writeup (this is the third time this exact class of
+// bug has shown up - vi.hoisted's callback is the only reliable fix,
+// not source-code ordering).
+const { mockLaunch, TEST_WORKSPACE } = vi.hoisted(() => {
+  const workspace = require("path").join(require("os").tmpdir(), `proxy-workspace-test-${Date.now()}`);
+  process.env.PROXY_WORKSPACE_DIR = workspace;
+  return { mockLaunch: vi.fn(), TEST_WORKSPACE: workspace as string };
+});
 vi.mock("./launch", () => ({ launch: mockLaunch }));
-
-// Must happen before fileTools.ts is imported below - its WORKSPACE_ROOT
-// is computed once at module load time from this env var, same as
-// openApp.ts/browse.ts read their config path at load time.
-process.env.PROXY_WORKSPACE_DIR = TEST_WORKSPACE;
 
 import { executeWriteFile, executeOpenPath, getWorkspaceRoot } from "./fileTools";
 

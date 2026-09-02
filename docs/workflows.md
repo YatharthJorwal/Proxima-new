@@ -14,9 +14,27 @@ verification actually happens here.
 - `npm run setup:cv` — one-time download of `hand_landmarker.task` via
   `scripts/download-hand-model.js`. Needed once before CV works locally,
   since the build sandbox has no network access to fetch it itself.
-- `npm test` — runs `orchestrator.test.ts` via `vitest` (Milestone 9 step
-  5). 11 mocked control-flow tests, no real Ollama/mic needed — safe to
-  run in the sandbox.
+- `npm run setup:gmail` — one-time OAuth authorization for Gmail
+  (Milestone 10 Part C, Gmail slice), via `scripts/gmail-auth.js`. Needs
+  `GMAIL_CLIENT_ID`/`GMAIL_CLIENT_SECRET` already in `.env` first (Google
+  Cloud Console steps: `README.md`); prints a `GMAIL_REFRESH_TOKEN` line
+  to paste into `.env` yourself afterward.
+- `npm test` — runs the full `vitest` suite (80 tests across 11 files as
+  of Milestone 13: orchestrator control-flow, file-tool sandboxing,
+  Gmail/system-usage/memory/run_script/session-log tool logic against
+  mocked, real-temp-file, or real-node/python boundaries (whichever is
+  most honest for that tool — see each test file's own docblock),
+  text-normalization, regex commands). No real Ollama/mic/Gmail/network
+  needed. As of this patch, also genuinely doesn't touch your real
+  `~/ProxyWorkspace` or `~/.proxima` — a real bug (not introduced by this
+  patch, but found while verifying it) previously had `fileTools.test.ts`
+  silently writing into your actual workspace folder on every run
+  instead of its intended temp directory; see `decisions.md` for the
+  full story. `run_script`'s tests do spawn
+  real `node` (and `python`, skipped automatically if not on PATH) child
+  processes against throwaway scripts in a real temp folder — still
+  fully sandboxed, nothing touches the real workspace or takes more than
+  a second or two.
 
 ## Configuration (`.env`)
 
@@ -45,6 +63,32 @@ assistant.
   a tool module's own resource rather than pipeline behavior. Worth
   confirming this default is actually where you want generated files to
   land before testing Part A for real.
+- `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` —
+  Milestone 10 Part C, Gmail slice. Read directly in `gmail.ts`. Google
+  Cloud Console setup + `npm run setup:gmail` walkthrough: `README.md`.
+  Without all three set, `get_emails` gives an honest "Gmail isn't
+  connected yet" reply rather than a generic failure.
+- `PROXY_MEMORY_FILE` (default `~/.proxima/memory.json`) — Milestone 10
+  Part D. Where Proxy's automatically-captured facts/preferences/project
+  context are stored — a flat JSON list, capped at 30 entries, oldest
+  pruned first. Read directly in `core/memory.ts`, same env-override-
+  with-sane-default pattern as `PROXY_WORKSPACE_DIR` above — but
+  deliberately not defaulted to somewhere inside the workspace folder,
+  since that folder is for files the user asked Proxy to write, not
+  Proxy's own internal state. No manual editing/review tooling in v1;
+  it's a plain JSON file if you want to look at or clear it directly.
+- `PROXY_SCRIPT_TIMEOUT_MS` (default `15000`) — Milestone 10 Part B.
+  How long `run_script` lets a confirmed script run before killing it via
+  `execFile`'s `timeout` option. Read directly in `runScript.ts`. Mainly
+  useful for tests (kept tiny there to exercise the kill path in
+  milliseconds instead of waiting out a real 15-second timeout) — not
+  something you're likely to need to change day-to-day.
+- `PROXY_SESSION_LOG_FILE` (default `~/.proxima/session-log.json`) —
+  Milestone 13. Where the dashboard's SESSION LOG card's history is
+  persisted across relaunches — a flat JSON list, capped at 500 entries,
+  oldest pruned first. Read directly in `core/sessionLog.ts`, same
+  env-override-with-sane-default pattern as `PROXY_MEMORY_FILE`. No
+  manual editing/review tooling beyond the file itself, same as memory.
 
 ## Verification workflow (sandbox vs. real machine)
 

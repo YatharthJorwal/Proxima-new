@@ -585,6 +585,17 @@ body {
 .log-kind.reply { color: var(--accent-2); }
 .log-kind.error { color: var(--alarm); }
 
+/* Milestone 13 — marks where a previous session's replayed history ends
+   and this session's live entries begin. */
+.log-divider {
+  color: var(--ink-dim);
+  text-align: center;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  padding: 6px 0;
+  opacity: 0.7;
+}
+
 .log-text {
   color: var(--ink);
   word-break: break-word;

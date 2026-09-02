@@ -9,12 +9,14 @@
     "start": "ts-node src/core/assistant.ts",
     "dashboard": "npm run build && electron .",
     "setup:cv": "node scripts/download-hand-model.js",
+    "setup:gmail": "node scripts/gmail-auth.js",
     "test": "vitest run"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.0.0",
     "@picovoice/pvrecorder-node": "^1.2.0",
     "dotenv": "^16.4.5",
+    "googleapis": "^176.0.0",
     "ollama": "^0.5.9",
     "sound-play": "^1.1.0"
   },

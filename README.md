@@ -64,7 +64,33 @@ PROXY_VAD_MAX_MS=15000
 PROXY_VAD_THRESHOLD=
 ```
 
-### 6. Install dependencies
+### 6. Gmail (optional, so Proxy can check your inbox)
+Skip this if you don't want Proxy to answer "do I have any new emails" /
+"any emails from X" - everything else in this project works fine without it.
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), create a
+   project (or use an existing one).
+2. Under **APIs & Services > Library**, search for "Gmail API" and enable it.
+3. Under **APIs & Services > OAuth consent screen**, set it up as
+   **External**, add yourself as a **test user** (this avoids needing
+   Google's app-verification review for a personal project like this).
+4. Under **APIs & Services > Credentials**, create an **OAuth client ID**
+   of type **Web application**, and add this exact **Authorized redirect
+   URI**: `http://localhost:53682/oauth2callback`
+5. Copy the **Client ID** and **Client secret** it gives you into `.env`:
+   ```
+   GMAIL_CLIENT_ID=...
+   GMAIL_CLIENT_SECRET=...
+   ```
+6. Run the one-time authorization script:
+   ```
+   npm run setup:gmail
+   ```
+   This opens your browser to a Google consent screen, then prints a
+   `GMAIL_REFRESH_TOKEN` line for you to paste into `.env` yourself -
+   nothing writes `.env` for you, same as every other credential above.
+
+### 7. Install dependencies
 ```
 npm install
 ```

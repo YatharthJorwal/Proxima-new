@@ -64,20 +64,26 @@ core/                  (project root — user renamed this from "files/" after M
       audioUtils.ts      # recordUntilSilence() — Milestone 8 VAD (energy/amplitude threshold),
                          # replaced the old fixed-4s recordSeconds()
       llm.ts            # chat() — Milestone 9 two-tier model calls (fast/smart, tiered `think`);
-                         # askProxy/askProxyWithTools kept as back-compat wrappers around it
+                         # askProxy/askProxyWithTools kept as back-compat wrappers around it.
+                         # systemPromptOverride (Milestone 10 Part D) lets an internal, non-reply
+                         # call (memory.ts's extraction) skip the Proxy-persona prompt entirely.
       stt.ts
       tts.ts            # Piper (default) + optional ElevenLabs upgrade path, reviewed
       textForSpeech.ts   # normalizeForSpeech() — strips/normalizes emoji, em/en dashes, smart
                          # quotes before a reply is shown or spoken. Called once in engine.ts's
                          # process(), not separately at the speak() call. See decisions.md.
       textForSpeech.test.ts # pure-function tests, npm test.
+      memory.ts          # Milestone 10 Part D (memory slice) — storage (flat capped local JSON,
+                         # ~/.proxima/memory.json) + extractAndStoreMemories(), the automatic
+                         # background capture called from engine.ts after each completed
+                         # interaction. recall_facts's read side lives in commands/memory.ts;
+                         # see this file's own docblock for the reliability tradeoff accepted here
+                         # and decisions.md for the full design record.
+      memory.test.ts     # real-temp-file tests (same pattern as fileTools.test.ts), npm test.
+                         # See decisions.md for a vi.hoisted/vi.mock ordering pitfall this file
+                         # ran into and fixed — worth reading before writing a similar test.
     commands/           # hardcoded + LLM-routed PC-automation commands
       index.ts          # deterministic regex router (fast path); returns {handler, reply}
-      intentRouter.ts   # single-shot LLM tool-calling router (Milestone 5); returns {reply, tool}.
-                         # No longer called by engine.ts as of Milestone 9 step 6 (orchestrator.ts
-                         # replaced that call) - kept around for now as a reference/fallback, not
-                         # wired into anything. Candidate for deletion once Milestone 9 is confirmed
-                         # solid on the user's real machine.
       orchestrator.ts    # Milestone 9 build order step 4 — the actual multi-step loop (two-tier
                          # escalation, step cap, defer_to_planner, cancellation). Wired into
                          # engine.ts as of step 6 — replaces the old intentRouter.ts call above.
@@ -106,6 +112,32 @@ core/                  (project root — user renamed this from "files/" after M
                          # via one PowerShell round-trip. First *query* tool (captures stdout),
                          # not an *action* one like everything above it. See decisions.md.
       systemUsage.test.ts # PowerShell-JSON parsing tests, incl. the single-item-array quirk,
+                         # npm test.
+      gmail.ts           # Milestone 10 Part C (Gmail slice) — get_emails query tool. Read-only
+                         # (gmail.readonly scope), metadata-only fetch (headers + Gmail's own
+                         # snippet, never the full body). Needs one-time OAuth setup — see
+                         # workflows.md/README.md. See decisions.md for why this shipped without
+                         # a confirmation gate.
+      gmail.test.ts      # header-parsing/summary tests against a mocked googleapis client,
+                         # npm test.
+      memory.ts          # Milestone 10 Part D — recall_facts tool executor (read side; storage
+                         # + automatic capture live in core/memory.ts). resultInformsNextStep:
+                         # true, the first tool to use that field for real. See decisions.md.
+      memory.test.ts     # tests against a mocked core/memory.ts, npm test.
+      sessionLog.ts      # Milestone 13 — persisted SESSION LOG card storage (flat capped local
+                         # JSON, ~/.proxima/session-log.json). Deliberately dumb: only stores/
+                         # returns {kind, text, timestamp} - never formats or interprets any of
+                         # it. main.ts relays already-formatted {kind, text} pairs from
+                         # renderer.js here rather than reformatting independently.
+      sessionLog.test.ts # real-temp-file tests, npm test.
+      runScript.ts       # Milestone 10 Part B — run_script tool + its confirmation mechanism
+                         # (validates + registers a pending confirmation; never executes
+                         # directly). The pending-confirmation state this file owns is checked
+                         # by engine.ts's process() before anything else runs. See decisions.md
+                         # for why voice-confirmation-via-a-following-turn was chosen over an
+                         # inline mid-run pause.
+      runScript.test.ts  # real end-to-end tests (real node/python, real temp workspace, no
+                         # mocking) — confirm/deny/unrelated-utterance/timeout-kill paths,
                          # npm test.
       volume.ts         # volume up/down/mute + executeVolume()
       window.ts         # maximize/minimize/restore/snap left/right + executeWindow()
@@ -368,6 +400,49 @@ assuming it's done or not done.
   through (return `null`) on an unrecognized app/site instead of
   answering wrong — see `project-status.md`'s Known limitations for the
   bug this fixed.
+- **`gmail.ts`** — Milestone 10 Part C, Gmail slice: `get_emails`, the
+  second query tool (see `systemUsage.ts` above for the query-vs-action
+  distinction this codebase draws). Fetches only message metadata (From/
+  Subject/Date headers) plus Gmail's own `snippet` field via the
+  `googleapis` client — never the full email body. Read-only by design:
+  the OAuth scope requested (`gmail.readonly`) can't send, delete, or
+  modify anything, which is what makes this safe to ship without
+  `requiresConfirmation` — same reasoning shape as `fileTools.ts`'s
+  sandboxing argument, applied to an OAuth scope instead of a filesystem
+  path. Needs one-time setup (`npm run setup:gmail`, see
+  `workflows.md`) before `GMAIL_CLIENT_ID`/`GMAIL_CLIENT_SECRET`/
+  `GMAIL_REFRESH_TOKEN` exist in `.env` — until then, the tool gives an
+  honest "Gmail isn't connected yet, run the setup" reply rather than a
+  generic failure. Full reasoning: `decisions.md`.
+- **`commands/memory.ts`** — Milestone 10 Part D: `recall_facts`, the
+  read side of `core/memory.ts`'s storage (that file owns the automatic-
+  capture half). The first tool marked `resultInformsNextStep: true` —
+  a recalled fact list is raw material for an answer, not the answer
+  itself, so the result gets fed back to the smart tier to compose a
+  real reply rather than read back verbatim. Plain case-insensitive
+  substring matching, no embeddings — matches this codebase's scale.
+  Full design record, including the reliability tradeoff knowingly
+  accepted for this tool and for automatic capture: `decisions.md`.
+- **`runScript.ts`** — Milestone 10 Part B: `run_script`, the tool this
+  codebase's confirmation mechanism was built for. `execute()` never
+  runs anything — it validates the request and stores a single pending
+  confirmation; the actual run happens only if the *next* turn is a
+  clear "yes," checked in `engine.ts`'s `process()` before the regex
+  router or the orchestrator see that utterance. A single non-matching
+  utterance (not a timeout) closes the confirmation window. Runs via
+  `execFile`'s async form, never sync — see the STT/"not responding"
+  finding for why that distinction is load-bearing here specifically.
+  Full design record, including why voice-confirmation-via-a-following-
+  turn was chosen over an inline mid-run pause: `decisions.md`.
+- **`sessionLog.ts`** — Milestone 13: persists the dashboard's SESSION
+  LOG card so it survives a relaunch. Genuinely dumb by design — only
+  stores/returns `{kind, text, timestamp}`, never formats or interprets
+  any of it; all the actual event-to-text formatting stays in
+  `renderer.js`, which mirrors what it already rendered back to
+  `main.ts` for persistence rather than `main.ts` reconstructing the
+  same formatting independently (a real drift risk avoided). Hydrated
+  once at startup, right before "ready" — same `did-finish-load` timing
+  fix "ready" itself already needed. Full design record: `decisions.md`.
 - **Two-tier model routing**: turn 1 of every request goes to a small fast
   model (`qwen3.5:4b`, `think: false`); the loop only escalates to
   `qwen3.5:9b` (`think: true`) for turn 2+ if the request actually needs

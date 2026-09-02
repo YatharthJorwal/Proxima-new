@@ -308,22 +308,32 @@ animate();
 // Log
 // ================================================================
 
-function timestamp() {
-  return new Date().toLocaleTimeString([], { hour12: false });
+function timestamp(date) {
+  return (date || new Date()).toLocaleTimeString([], { hour12: false });
 }
 
-function appendLog(kind, text) {
+// Milestone 13 — opts.timestamp (an ISO string) lets hydrated history
+// entries show their real original time instead of "now"; opts.skipPersist
+// stops a hydrated entry from being written straight back to the log file
+// it was just read from. Everything else about a live vs. a replayed
+// entry is identical - same DOM row, same styling, same describeRoute()
+// formatting already applied by the caller before this function even
+// sees the text.
+function appendLog(kind, text, opts = {}) {
   if (logEmpty) logEmpty.remove();
   const row = document.createElement("div");
   row.className = "log-entry";
   row.innerHTML = `
-    <span class="log-time">${timestamp()}</span>
+    <span class="log-time">${timestamp(opts.timestamp ? new Date(opts.timestamp) : undefined)}</span>
     <span class="log-kind ${kind}">${kind}</span>
     <span class="log-text"></span>
   `;
   row.querySelector(".log-text").textContent = text; // textContent, not innerHTML — never trust transcribed/model text as markup
   log.appendChild(row);
   log.scrollTop = log.scrollHeight;
+  if (!opts.skipPersist) {
+    window.proxy.persistLogEntry(kind, text);
+  }
 }
 
 function describeRoute(info) {
@@ -332,6 +342,10 @@ function describeRoute(info) {
   // Milestone 9 step 6: tools (plural) — the orchestrator can chain more
   // than one real tool call per request now.
   if (info.source === "llm-tool") return `LLM tool → ${info.tools.join(", ")}`;
+  // Milestone 10 Part B — the follow-up turn that resolves a run_script
+  // confirmation request, resolved before the regex router or the
+  // orchestrator ever see it.
+  if (info.source === "confirmation") return info.confirmed ? "confirmation → confirmed" : "confirmation → cancelled";
   return "conversation (no command)";
 }
 
@@ -342,6 +356,27 @@ function truncate(text, max) {
 // ================================================================
 // Engine event wiring
 // ================================================================
+
+// Milestone 13 — sent once, before "ready", right after the persisted
+// session log (previous runs) is loaded. Replays each entry through the
+// exact same appendLog() a live entry uses (skipPersist so hydration
+// doesn't write the history right back to the file it came from,
+// timestamp so a from-yesterday entry shows yesterday's time, not "now"
+// — showing a fake current-looking timestamp for something that already
+// happened would be its own small dishonesty). A plain divider marks
+// where previous-session history ends and this session's live entries
+// begin, so scrolling back never reads as "all one continuous session"
+// when it wasn't.
+window.proxy.on("log-history", (entries) => {
+  if (!Array.isArray(entries) || entries.length === 0) return;
+  entries.forEach((e) => appendLog(e.kind, e.text, { skipPersist: true, timestamp: e.timestamp }));
+  if (logEmpty) logEmpty.remove();
+  const divider = document.createElement("div");
+  divider.className = "log-divider";
+  divider.textContent = "— new session —";
+  log.appendChild(divider);
+  log.scrollTop = log.scrollHeight;
+});
 
 window.proxy.on("ready", (payload) => {
   hotkeyLabel.textContent = `hotkey: ${payload.hotkey}`;
@@ -428,6 +463,18 @@ window.proxy.on("tool-start", (name) => {
 
 window.proxy.on("tool-result", ({ name, result }) => {
   resolveActivityRow(currentRow, { sub: truncate(result, 70) });
+});
+
+// Milestone 10 Part B — a script is now awaiting a yes/no on the next
+// turn (see runScript.ts's docblock). This row stays open, not
+// auto-resolved, since there's no "still waiting" event to resolve it
+// with yet - it gets resolved implicitly the next time any row opens
+// (resolveActivityRow(currentRow) at the top of the next turn's first
+// event), same as every other row in this panel.
+window.proxy.on("awaiting-confirmation", (info) => {
+  resolveActivityRow(currentRow);
+  addActivityRow(`Awaiting confirmation: run ${info.path}`, { action: true });
+  flashAction();
 });
 
 window.proxy.on("thinking", (trace) => {

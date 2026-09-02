@@ -13,8 +13,11 @@ contradicted itself (or was ambiguous about current truth) turned up.
    (`orchestrator.ts`) is wired into `engine.ts` (step 6), replacing the
    old `intentRouter.ts` call; the Activity panel dashboard component
    (also step 6) is built; and a thin slice of mocked unit tests (step
-   5, 11 tests, `npm test`) passes. See the Milestone 9 section below
-   for the accurate current step-by-step status.
+   5, 11 tests, `npm test`) passes. Step 7's three real-machine test
+   cases are now confirmed too (see the Milestone 9 section below) —
+   Milestone 9 is fully done. `intentRouter.ts` itself has been deleted
+   from the codebase (it was flagged as a deletion candidate once this
+   confirmation landed — see `decisions.md`).
 2. **Camera card position.** The Milestone 7 entry in the original
    numbered milestone list said: *"Pending UI tweak, not yet built: move
    the Camera card to the bottom-left corner."* But the more detailed
@@ -39,14 +42,21 @@ contradicted itself (or was ambiguous about current truth) turned up.
    only) done, confirmed working; gesture-to-action wiring deferred to
    Milestone 10
 8. ~~Voice activity detection (VAD)~~ — done, confirmed working
-9. Task orchestration / multi-step tool calling — **in progress, steps
-   1-6 of 7 built**, see detailed status below
+9. ~~Task orchestration / multi-step tool calling~~ — **done, confirmed**
+   (all 7 steps, including step 7's real-machine test cases), see
+   detailed status below
 10. Agentic capabilities (file tools, code execution, gesture wiring,
-    memory) as orchestrator tools — **in progress**, see detailed status
-    above. Part A (file tools) done; parts B-D not started.
+    external data, memory) as orchestrator tools — **in progress**, see
+    detailed status below. Parts A and B (file tools, code execution)
+    confirmed working; Part C (external data) started (Gmail slice
+    built, not yet real-machine tested — needs your OAuth setup + a real
+    test); Part D (memory) started (automatic-capture slice built, not
+    yet real-machine tested; gesture-to-action wiring not started).
 11. Maps / location awareness — not started
 12. Bluetooth / connected devices — not started
-13. Settings panel + persistent dashboard session history — not started
+13. Settings panel + persistent dashboard session history — **in
+    progress**: session log persistence built, not yet real-machine
+    tested; settings UI not started
 14. Dashboard visual refresh — not started, planning stage (full spec
     below)
 15. STT upgrade (Distil-Large-v3.5 + real GPU acceleration) — investigation
@@ -58,8 +68,8 @@ contradicted itself (or was ambiguous about current truth) turned up.
     genuinely easy when it happens
 18. Alternative activation: double-clap trigger — not started
 19. System monitor (Task Manager tile + Proxy-queryable resource usage) —
-    Part A (the tool) done, not yet real-machine tested; Part B (the
-    sidebar tile) blocked on Milestone 14
+    Part A (the tool) done, confirmed working; Part B (the sidebar tile)
+    blocked on Milestone 14
 20. 3D modeling assistant ("a personalized Blender") — not started, the
     last major planned undertaking, phased (see below) — by far the
     biggest item on this roadmap
@@ -172,7 +182,7 @@ env knobs, and the calibration edge case are documented in
 function, to avoid a code path that no longer matches what the UI claims is
 happening.
 
-## Milestone 9 — Task orchestration — in progress, steps 1-6 of 7 built
+## Milestone 9 — Task orchestration — done, confirmed on the real machine
 
 The big next architectural piece. The old `intentRouter.ts` handled exactly
 one tool call per utterance — it couldn't chain steps, so "open notepad and
@@ -199,17 +209,19 @@ finished). `engine.ts` no longer calls `intentRouter.ts` as of step 6 below.
    the sandbox. `vitest` is a new devDependency; nothing tested this repo
    before.
 6. Wiring the orchestrator into `engine.ts` (replacing `intentRouter.ts`),
-   plus the new Activity panel dashboard component — **done, built and
-   typechecked/built clean in the sandbox, not yet real-machine tested.**
-   See "Activity panel" and "Cancellation" below for what actually shipped
-   here versus the original plan.
-7. **Not yet done** — real-machine test cases: "hello" (should stay a
-   one-fast-tier-call plain reply), "open notepad and snap it to the left"
-   (should chain two tool calls through the smart tier), "who made you"
-   (should surface the personality/creator bio). This is the one remaining
-   piece of Milestone 9, and it needs the user's actual machine, real
-   Ollama, and the real dashboard — nothing further to verify from the
-   sandbox alone.
+   plus the new Activity panel dashboard component — **done, confirmed
+   working on the real machine** (see step 7 below). See "Activity panel"
+   and "Cancellation" below for what actually shipped here versus the
+   original plan.
+7. **Done, confirmed.** Real-machine test cases — "hello" (one-fast-tier-
+   call plain reply), "open notepad and snap it to the left" (chained two
+   tool calls through the smart tier), "who made you" (surfaced the
+   personality/creator bio) — all confirmed working. Also confirmed in
+   the same real-machine pass: the regex-fallthrough fix ("open chrome
+   and open youtube," "open github," etc.), Milestone 10 Part A's file
+   tools, the TTS text-normalization fix, and Milestone 19 Part A's
+   `get_system_usage` tool. Milestone 9 is fully done — nothing left
+   pending on it.
 
 **Processing pipeline** (as actually wired now): hotkey → VAD → regex fast
 path (unchanged) → orchestrator loop. Turn 1 of every request goes to the
@@ -281,8 +293,8 @@ orchestrator tools for existing PC actions, but real code generation
 (stock prices, messages). Broken into parts so each ships as its own
 reviewable, testable slice rather than one big undertaking:
 
-**Part A — file tools (write_file, open_path) — done, sandboxed, not yet
-real-machine tested.** The first concrete step toward "make me Flappy
+**Part A — file tools (write_file, open_path) — done, confirmed working
+on the real machine.** The first concrete step toward "make me Flappy
 Bird" actually working: `write_file` creates a source/content file (HTML,
 JS, CSS, JSON, MD, TXT, CSV, SVG, PY) and `open_path` opens it via the
 OS's default handler (an `.html` file opens in the browser - genuinely
@@ -307,21 +319,47 @@ just be a lie about safety that isn't actually there. Sandboxing plus a
 narrow extension allowlist is what makes these two safe enough to ship
 without that gate; the next part isn't.
 
-**Part B — code execution (a `run_script` tool) — not started, and
-deliberately blocked on something else first: a real confirmation-and-
-wait mechanism.** "Write me a Python script and run it" needs actual
-process execution, which is a categorically bigger risk surface than
-"write a file to a sandboxed folder" - even restricted to a fixed set of
-known interpreters (`node`, `python`) on a workspace-confined path rather
-than an arbitrary shell string, this is the piece that actually needs the
-model to pause and the user to confirm before it happens for anything
-beyond the most trivial case. Needs real design work: does confirmation
-happen by voice, by a dashboard button, does the orchestrator loop
-literally block waiting on it. Not attempted yet.
+**Part B — code execution (a `run_script` tool) — done, confirmed
+working on the real machine.** The confirmation-mechanism design question this
+was blocked on is now decided and implemented: voice confirmation via a
+separate, following turn (not an inline mid-run pause — see
+`decisions.md` for why the app's own architecture made that the natural
+choice, not just a preference). `run_script`'s `execute()` never runs
+anything itself — it validates the request (workspace-relative path,
+`.js`/`.py` only, must already exist) and asks for a yes/no; the actual
+run happens only if the *next* utterance is a clear confirmation,
+checked before the regex router or the orchestrator ever see it. A clear
+no cancels; anything else (including an unrelated new request) silently
+drops the pending confirmation with no time-based expiry — a single
+non-matching utterance is what closes the window, not a clock. Runs via
+`execFile`'s async form (never sync — see the STT/"not responding"
+finding above for exactly why that distinction matters here),
+timeout-capped (`PROXY_SCRIPT_TIMEOUT_MS`, default 15s) and output-capped
+(500 characters) in the spoken reply. 10 new unit tests
+(`runScript.test.ts`) — real end-to-end, not mocked: actually runs real
+`node`/`python` against real throwaway scripts, including a genuine
+timeout-and-kill test. Confirmed on the real machine: write-then-run,
+confirm, deny, and the drop-on-unrelated-utterance path all worked as
+designed.
 
-**Part C — external data (stock prices, Gmail) — not started, real
-sources researched** (see `decisions.md` for the full findings — searched
-rather than assumed, since this matters for what's actually buildable):
+**Part C — external data (stock prices, Gmail) — Gmail slice built, not
+yet real-machine tested; everything else in this part still just
+researched, not started.** Gmail was picked as the first slice to
+actually build (over Groww — see below, no portfolio exists yet to
+connect to): `get_emails`, a read-only query tool (`gmail.readonly`
+OAuth scope — can't send, delete, or modify anything, which is what
+lets this ship without a confirmation gate; full reasoning:
+`decisions.md`). Fetches only message metadata (From/Subject/Date) plus
+Gmail's own short `snippet`, never full email bodies. Needs one-time
+OAuth setup (`npm run setup:gmail`, README.md) before it can be tested
+for real — confirm you've completed that and gotten a real answer back
+("do I have any new emails," "any emails from X") before this counts as
+done. 8 unit tests (`gmail.test.ts`) cover header-parsing and the
+summary logic against a mocked Gmail client.
+
+Everything else researched for this part (see `decisions.md` for the
+full findings — searched rather than assumed, since this matters for
+what's actually buildable):
 - **Groww** — genuinely straightforward. Groww now has an official
   Trading API (₹499/month subscription) covering portfolio/holdings,
   live market data, and historical data — exactly the shape needed for
@@ -334,26 +372,44 @@ rather than assumed, since this matters for what's actually buildable):
 - **Generic stock quotes** (for symbols outside Groww holdings) — any of
   the standard free-tier market data APIs (Alpha Vantage, Finnhub, etc.)
   would cover this cleanly, same shape as the above.
-- **Gmail** — the easy one. Official Gmail API, standard OAuth2, reading
-  and searching messages is exactly what it's designed for. No caveats.
+- **Gmail** — the easy one, and the one built (see above). Official
+  Gmail API, standard OAuth2, reading and searching messages is exactly
+  what it's designed for. No caveats.
 - **Apple Stocks app** specifically — not a real integration target.
   Apple doesn't expose the Stocks app to third parties at all; "stock
   data on the PC" means a real market-data API (above), not pulling from
   the iPhone's own Stocks app.
 
-Recommendation unchanged from the original scoping conversation: prove
-the pattern with one source (Groww or Gmail, both genuinely simple)
-before building toward more. Confirmed: no Groww portfolio exists yet, so
-that specific piece would ship with nothing to actually connect to for
-now - staying exactly where it is in the roadmap until there's a real
-portfolio to point it at.
+Recommendation, updated now that Gmail is built: prove the pattern held
+(confirm the real-machine test above), then Groww is the natural next
+source once there's an actual portfolio to point it at — no Groww
+portfolio exists yet, so that piece stays exactly where it is in the
+roadmap until there's a real one.
 
-**Part D — the original placeholder scope** (gesture-to-action wiring,
-Milestone 7 follow-up; memory - Proxy remembering facts/preferences
-across sessions and referencing them naturally) - still not started, still
-not scoped in detail. Distinct from the dashboard's session-log
-persistence in Milestone 13, which is just the UI log surviving a
-relaunch, not the LLM knowing anything.
+**Part D — memory slice built, not yet real-machine tested; gesture-to-action wiring still not started.** Scoped in
+conversation first (see `decisions.md` for the full design record,
+including two deliberate reliability tradeoffs taken on knowingly): facts,
+preferences, and project context are captured **automatically** — a
+background smart-tier call looks at each completed interaction after the
+user has already heard their reply and decides if anything durable is
+worth keeping, storing it in a flat capped local JSON file
+(`~/.proxima/memory.json`, `PROXY_MEMORY_FILE` overridable, 30-entry cap,
+oldest pruned first). No manual `remember_fact`/`forget_fact` override in
+v1 — a bad automatic capture just sits in the list until pruned, a real
+known limitation, not solved here. Recall happens through a new
+`recall_facts` tool the model calls on demand (plain substring matching,
+no embeddings) — the first tool marked `resultInformsNextStep: true`,
+since a raw fact list is material for an answer, not the answer itself.
+13 new unit tests (`core/memory.test.ts`, `commands/memory.test.ts`)
+cover storage/cap/dedup logic and the recall tool's filtering, all against
+mocked or real-temp-file boundaries — no real Ollama call has been
+verified to actually extract sensible facts from a real conversation yet.
+
+**Gesture-to-action wiring** (the other original Part D item, a
+Milestone 7 CV follow-up) — still not started, still not scoped.
+Distinct from the dashboard's session-log persistence in Milestone 13,
+which is just the UI log surviving a relaunch, not the LLM knowing
+anything.
 
 ## Milestone 16 — iPhone integration (messages, remote control) — not started, real feasibility researched
 
@@ -410,13 +466,41 @@ Ties to the dashboard's "Connected devices" coming-soon tile. Needs real
 device enumeration (Windows Bluetooth/WinRT APIs, likely via a native Node
 addon) — real data or an honest empty state, never placeholder numbers.
 
-## Milestone 13 — Settings panel + persistent dashboard session history — not started
+## Milestone 13 — Settings panel + persistent dashboard session history — in progress
 
 Right now all configuration is `.env`-only and the dashboard's session log
 resets on every relaunch. A real settings UI and a persisted log (even just
 a local JSON/SQLite file) would remove the last "everything resets" rough
 edge. This is the dashboard's UI log persisting — not Proxy remembering
 anything about the user (that's Milestone 10).
+
+**Session log persistence — built, not yet real-machine tested.** Every
+SESSION LOG card entry (`heard`/`routed`/`reply`/`status`/`error`) is now
+mirrored to a flat local JSON file (`~/.proxima/session-log.json`,
+`PROXY_SESSION_LOG_FILE` overridable, capped at 500 entries, oldest
+pruned) as it's rendered, and replayed on the next launch — with real
+original timestamps, not "now" — separated from the new session's live
+entries by a plain divider. `main.ts` never formats anything itself; it
+mirrors the already-formatted `{kind, text}` pairs `renderer.js` already
+rendered, so there's exactly one place (`renderer.js`) that decides how
+an event reads. 5 new unit tests (`sessionLog.test.ts`) cover load/
+append/cap logic against a real temp file. Not yet confirmed the actual
+relaunch-and-see-history-restored flow works end to end on the real
+machine — the sandbox can't launch Electron to check that.
+
+**Settings UI — not started.** A real design question sits ahead of
+building this, not just implementation work: does changing a setting in
+the UI take effect live, or only after restarting Proxy? Nearly every
+env var added so far (`PROXY_WORKSPACE_DIR`, `GMAIL_*`,
+`PROXY_MEMORY_FILE`, `PROXY_SCRIPT_TIMEOUT_MS`) is read once at module
+load time throughout this codebase — a live-reload settings UI would
+need rearchitecting config loading everywhere, while a "restart to
+apply" settings UI is honest about that limitation and buildable now.
+Leaning toward the latter for a first version (matches this project's
+"don't build the harder version until the simpler one proves
+insufficient" instinct elsewhere), but not decided — worth confirming
+with the user before starting, same as Part B's confirmation-mechanism
+question was.
 
 ## Milestone 14 — Dashboard visual refresh — not started, planning stage
 
@@ -512,8 +596,8 @@ size of the change.
   optional upgrade (falls back to Piper automatically if no API key is
   set) — reviewed and confirmed sound, currently dormant since no key is
   configured.
-- **Found in real-machine testing, fixed this patch**: the LLM would
-  occasionally produce emoji, em/en dashes, and smart quotes in replies,
+- **Found in real-machine testing, fixed and confirmed working**: the LLM
+  would occasionally produce emoji, em/en dashes, and smart quotes in replies,
   which Piper (a local TTS model) struggles with — garbled or dropped
   audio on the character itself, not just an odd pause. `llm.ts`'s system
   prompt now explicitly asks the model to avoid these (PERSONALITY), and
@@ -543,7 +627,8 @@ size of the change.
   zero-latency fast path; fuzzier phrasing gets caught by the LLM router
   instead (slower — an LLM round trip — but working) rather than falling
   through to plain command-unaware conversation.
-- **Found in real-machine testing, fixed this patch**: `open_app`'s regex
+- **Found in real-machine testing, fixed and confirmed working**:
+  `open_app`'s regex
   fast path (`OPEN_PATTERN` in `openApp.ts`) matches any "open X" phrase,
   which meant it was grabbing requests it had no business claiming and
   answering confidently wrong instead of letting anything better try:
@@ -564,12 +649,95 @@ size of the change.
   on an unrecognized app/site instead of answering, letting the router
   chain — and past it, the orchestrator, which has both `open_app` and
   `browse` and can reason about phrasing a fixed regex can't — take a real
-  shot. Regression tests: `openApp.test.ts`, `browse.test.ts`. What's
-  *not* fixed by this, and remains a real open question (see Open
-  Questions below): whether the model reliably picks the *right* tool and
-  chains multi-step requests correctly once it does get a shot at them —
-  that's a separate, genuine LLM-reliability question, not a routing bug,
-  and needs real-machine confirmation.
+  shot. Regression tests: `openApp.test.ts`, `browse.test.ts`. The
+  remaining open question this entry used to flag — whether the model
+  reliably picks the *right* tool and chains multi-step requests
+  correctly once it gets a real shot at them — is now confirmed: "open
+  chrome and open youtube," "open youtube on chrome and search for
+  pewdiepie," and "open github" were all specifically retested on the
+  real machine and route correctly.
+- **Found in real-machine testing, deferred by request, not fixed**: the
+  fast tier appears to never actually escalate to the smart tier via
+  `defer_to_planner` — the Activity panel consistently shows "deciding:
+  fast tier" only. Confirmed two ways in this session: (1) the Gmail
+  real-machine test's activity log showed a direct
+  `heard → routed (LLM tool → get_emails) → reply` path with no smart-
+  tier step; (2) asking Proxy to write a full Flappy Bird game produced a
+  file and an opened window, but no working gameplay (no bird, no
+  movement) — consistent with the entire game having been generated
+  single-shot by the small, non-reasoning fast-tier model via `write_file`
+  (a fire-and-forget tool — once called, its result is the final reply,
+  no smart-tier review ever happens) rather than the fast tier
+  recognizing the task needed real reasoning and deferring. Likely root
+  cause: `write_file`'s tool description doesn't tell the fast tier
+  where its own limits are — nothing currently instructs it to defer for
+  anything beyond trivial file writes, so a small model overestimating
+  its own confidence on codegen isn't surprising. **Not fixed** — the
+  user explicitly chose to defer this and address tool-description limits
+  more broadly later (across this tool and future ones) rather than
+  patch `write_file` in isolation right now. Directly informed two
+  Milestone 10 Part D design choices (see `decisions.md`): the
+  `recall_facts` tool accepted this same "will the model choose to call
+  an optional tool" risk knowingly, and automatic memory-capture was
+  deliberately routed to the smart tier rather than the fast tier for
+  the same reason. **Update, same session**: confirmed this generalizes
+  beyond `write_file` specifically — asking "you feel laggy" (a casual
+  remark, not "give me full system stats") routed to `get_system_usage`
+  and got the tool's entire raw formatted dump back verbatim (CPU%,
+  memory breakdown, top processes by memory AND by total CPU time) as the
+  spoken reply. Correct data, wrong length and tone for what was
+  actually asked. Same root mechanism: any tool without
+  `resultInformsNextStep` returns its own text as the final reply with no
+  pass to actually compose an answer shaped to the question — not a
+  `write_file`-specific quirk, a structural property of every current
+  fire-and-forget tool (`get_system_usage`, `get_emails`, `write_file`,
+  `open_path`). Still deferred by request, same broader tool-limits pass
+  as above.
+- **Found in real-machine testing, fixed in code, not yet re-tested**:
+  "who am i" got a rambling reply that doesn't know who's actually
+  asking — addressed the user as an anonymous "someone who uses this,"
+  not by name, and confusingly hedged between answering "who are you"
+  instead. Root cause: `CREATOR_BIO` told the model Yatharth is "the
+  creator" as a separate fact, but never said the person actually talking
+  to Proxy right now IS Yatharth — the model wasn't connecting those on
+  its own. Fixed by making that connection explicit in `CREATOR_BIO`
+  directly (`llm.ts`), plus adding "sir" as a natural form of address —
+  both hardcoded rather than derived, since this is a single-user
+  personal project where that's simply always true. Not yet re-tested on
+  the real machine — confirm "who am i" gives a real answer now.
+- **Found in real-machine testing, not fixed, needs a real architecture
+  decision**: Electron became unresponsive (Windows' standard "not
+  responding" dialog, wait/close) twice during this session's testing.
+  No confirmed root cause (not reproduced/profiled directly), but the
+  code gives a strong candidate: `stt.ts`'s `transcribe()` runs Whisper
+  inference via a direct `await transcriber(audio, ...)` call - no
+  worker thread, no `utilityProcess.fork()`, no child process - and it's
+  invoked from `engine.ts`, which runs in Electron's own main process
+  (instantiated directly in `main.ts`). The logged transcription time
+  that session was 16.8 seconds; a CPU-bound native ONNX inference call
+  of that length blocking the main process's own message loop is exactly
+  what triggers Windows' unresponsive-app detector, and matches the
+  reported symptom precisely. If this is confirmed, the real fix is
+  moving STT inference off the main process entirely (a worker thread or
+  Electron `utilityProcess`) - a genuine architecture change, not a
+  one-line patch, so this is logged as a finding to revisit deliberately,
+  not fixed here. Worth deliberately triggering a slow transcription
+  again and watching whether the dashboard UI (not just voice) also
+  freezes during it, which would confirm the main-process-blocking
+  theory versus some other cause.
+- **Found during this session's own patch verification, fixed and
+  confirmed**: `npm test` was silently writing real files
+  (`flappybird.html`, `games/snake.js`, `note.txt`, `script.py`) into the
+  real default `~/ProxyWorkspace` on whatever machine ran it, every test
+  run, for an unknown length of time before this — not the throwaway
+  temp directory `fileTools.test.ts`'s own docblock describes. Root
+  cause and fix: `decisions.md`'s test-writing-pitfall entries (this is
+  the third instance of the same underlying bug class). Confirmed after
+  the fix: a full `npm test` run no longer touches `~/ProxyWorkspace` or
+  `~/.proxima` at all. Worth being aware this means past test runs, in
+  this session and possibly others, may have left real files in that
+  folder — nothing harmful was ever written (test fixture content only),
+  but it's real disk state that didn't need to be there.
 - **Found in real-machine testing**: if the user types into the INPUT box
   and hits send while Proxy is still busy on a previous request, the typed
   text currently disappears rather than being preserved. Queued for
@@ -616,7 +784,7 @@ difference from how the pipeline works today. False-positive tuning (a
 door slam, keys jangling, an actual clap in a video) will need the same
 kind of calibration work VAD's threshold went through.
 
-## Milestone 19 — System monitor (Task Manager tile + Proxy-queryable resource usage) — Part A done, not yet real-machine tested; Part B blocked on Milestone 14
+## Milestone 19 — System monitor (Task Manager tile + Proxy-queryable resource usage) — Part A done, confirmed; Part B blocked on Milestone 14
 
 Split once actually scoped, since the two halves turned out to have
 different feasibility: a live hardware-usage sidebar tile (Part B)
@@ -624,8 +792,8 @@ genuinely can't be built yet — there's no sidebar to put it in, that's
 Milestone 14's job, still not started. The orchestrator tool (Part A)
 doesn't have that dependency, so it shipped on its own.
 
-**Part A — `get_system_usage` tool — done, typechecked/tested/built in
-the sandbox, not yet real-machine tested.** Queries CPU%, memory
+**Part A — `get_system_usage` tool — done, confirmed working on the real
+machine.** Queries CPU%, memory
 used/total, and the top 5 processes by memory and by cumulative CPU time
 via one PowerShell round-trip (`Get-CimInstance`, `Get-Counter`,
 `Get-Process` — same invocation family `volume.ts`/`window.ts` already
@@ -694,12 +862,15 @@ already filtered and summarized against known interests, not a raw feed
 dump. Fetching doesn't need a paid API — most outlets publish RSS feeds
 directly, no signup, no rate limit. The genuinely personalized version
 ("it knows my interests without being told each time") depends on
-Milestone 10 Part D (memory) existing first; until then, this ships in a
-simpler form — a static, user-configured interest list (similar in
-spirit to `config/commands.json`) - still real and useful, just less
-automatic than the end state. One of the more straightforward items on
-this roadmap: no new architecture, no ongoing cost, composes cleanly with
-what Milestone 14 already has planned for the sidebar.
+Milestone 10 Part D (memory)'s automatic-capture slice, now built
+(pending real-machine confirmation — see the Milestone 10 section
+above); until that's confirmed working end-to-end, or if you'd rather
+not wait, this ships in a simpler form — a static, user-configured
+interest list (similar in spirit to `config/commands.json`) - still real
+and useful, just less automatic than the end state. One of the more
+straightforward items on this roadmap: no new architecture, no ongoing
+cost, composes cleanly with what Milestone 14 already has planned for
+the sidebar.
 
 ## Milestone 22 — Proxy can call your phone — not started, real feasibility researched, genuinely different in kind from everything else here
 
@@ -741,29 +912,53 @@ patch comes next rather than tracking as its own item.
 
 ## Open questions (need your input)
 
-- **Milestone 9, step 7**: run the three real-machine test cases above
-  ("hello," "open notepad and snap it to the left," "who made you") and
-  report back — this is the only thing left before Milestone 9 can be
-  called done. Also worth throwing in while testing, now that the regex
-  fallthrough bug above is fixed: "open chrome and open youtube," "open
-  youtube on chrome and search for pewdiepie," "open github" — confirm the
-  orchestrator actually picks the right tool(s) for these now that it's
-  getting a real shot at them. Also worth trying "what's eating my RAM"
-  and similar once Milestone 19 Part A's patch is applied — real
-  PowerShell output on your actual machine hasn't been checked, only the
-  parsing logic against mocked data in the sandbox.
+- **Milestone 10 Part C, Gmail slice**: the real-machine test came back
+  "Gmail isn't connected yet" — the tool's own honest not-configured
+  reply, not a real answer. Most likely cause: `GMAIL_REFRESH_TOKEN`
+  never made it into `.env` after running `npm run setup:gmail`, or the
+  app wasn't restarted after editing `.env`. Worth double-checking all
+  three `GMAIL_*` values are actually in `.env` and restarting before
+  retrying "do I have any new emails."
+- **Milestone 10 Part D, memory slice**: try it for real once you've
+  had a few ordinary interactions with Proxy — check
+  `~/.proxima/memory.json` (or wherever `PROXY_MEMORY_FILE` points) to
+  see what it's actually capturing, and try asking something
+  `recall_facts` would need to answer (e.g. "what do you know about my
+  <project>"). Only mocked/unit-tested so far, not confirmed against a
+  real Ollama call end-to-end.
+- **Milestone 13, session log persistence**: close Proxy, relaunch it,
+  and confirm your previous session's log entries actually reappear
+  above a "— new session —" divider with their real original times, not
+  "now." The sandbox can't launch Electron to check this end-to-end.
+- **Milestone 13, settings UI**: does changing a setting take effect
+  live, or only after restarting Proxy? Leaning toward "restart to
+  apply" as the honest, buildable-now v1 (see `decisions.md`) — but this
+  is your call before it gets built, not a default to just proceed on.
 - **Camera card position**: can you confirm you've actually seen it in the
   bottom-left on your machine? (See the flagged discrepancy at the top of
   this file — the code itself already checks out.)
 - **Milestone 10 workspace folder**: `write_file`/`open_path` default to
-  `~/ProxyWorkspace` if `PROXY_WORKSPACE_DIR` isn't set. Worth confirming
-  that's actually where you want generated files to land, or whether
-  you'd rather set the env var to somewhere else (a synced folder, a
-  specific project directory, etc.) before testing Part A for real.
-- **Milestone 10 Part B priority**: is code execution (`run_script`) or
-  external data (stock/messages) more valuable to build next, once Part
-  B's confirmation-mechanism design work happens? Not urgent to answer
-  now, just flagging it's an open ordering question.
+  `~/ProxyWorkspace` if `PROXY_WORKSPACE_DIR` isn't set. Now confirmed
+  working at that default — flagging only in case you'd rather point it
+  somewhere else (a synced folder, a specific project directory, etc.).
+- **Tool-limits pass (deferred, narrowed)**: two findings still waiting
+  on the same later pass — (1) the fast tier never deferring to the
+  smart tier (Flappy Bird / Gmail activity-log finding), (2) fire-and-
+  forget tools returning raw, unscoped output regardless of how the
+  question was actually phrased (`get_system_usage` yapping full stats
+  at a casual "you feel laggy"). The third item that used to be grouped
+  here — hardcoding "sir" + the user's identity into `PERSONALITY` — is
+  now done (see `decisions.md`); it turned out small enough not to need
+  the broader pass after all. (1) and (2) still share a root mechanism —
+  see Known Limitations above and `decisions.md` — and Milestone 10 Part
+  D's `recall_facts`/automatic-capture design already had to account for
+  (1)'s risk.
+- **Electron "not responding" during STT** (see Known Limitations above):
+  a real architecture change if the main-process-blocking hypothesis is
+  right (moving `transcribe()` off Electron's main process), not
+  something to patch reflexively. Worth deliberately reproducing first —
+  trigger a slow transcription and check whether the dashboard UI itself
+  also freezes — before committing to a fix approach.
 - **Milestone 15 go-ahead**: do you want to proceed with the whisper.cpp +
   CUDA + Distil-Large-v3.5-ggml path? It's a real architecture change (new
   native module, new model format, `stt.ts` rewrite), not a quick patch —

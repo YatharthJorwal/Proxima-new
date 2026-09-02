@@ -730,7 +730,409 @@ of decision.
 **FRIDAY/JARVIS tone ("call me sir")**: explicitly NOT scoped as a
 milestone - it's a few lines in `llm.ts`'s existing `PERSONALITY`
 constant, no new capability, no research needed. Recorded here only so
-it doesn't get lost, not because it needed feasibility analysis.
+it doesn't get lost, not because it needed feasibility analysis. Now
+confirmed wanted, with a second piece added to the same request:
+real-machine testing surfaced "who am i" getting an answer that doesn't
+know who's actually asking (rambling, addresses the user as an anonymous
+"someone who uses this," not by name) — the user wants both (1) "sir" as
+a hardcoded form of address and (2) the fact that the user IS Yatharth
+(the project's own creator) hardcoded into `PERSONALITY` directly, not
+derived at runtime. Explicitly acceptable per the user for a single-user
+personal project — this is not a general-purpose product decision, just
+a personality constant matching who's actually running this on their own
+machine. Implemented in `CREATOR_BIO` (`llm.ts`) — turned out small
+enough to just do rather than needing the broader tool-limits pass the
+tool-verbosity finding is waiting on (`project-status.md`'s Known
+Limitations). Not yet re-tested on the real machine.
+
+## Milestone 10 Part C, Gmail slice: read-only scope instead of a confirmation gate
+
+Prompted by picking Gmail as the first Part C slice to actually build
+(over Groww, which has nothing to connect to yet since no portfolio
+exists — see the Milestone 10 Part C research above). The same open
+question that blocks `run_script` (Part B) — "this needs a confirmation
+gate that doesn't exist yet" — does not apply here, and it's worth
+being explicit about why, since the tool schema's `requiresConfirmation`
+field could otherwise look like an oversight if left unset:
+
+- **The OAuth scope requested is `gmail.readonly`**, not the broader
+  `gmail.modify`/`gmail.send`. This isn't a self-imposed rule enforced
+  by this codebase's own logic (the way `fileTools.ts`'s extension
+  allowlist and workspace-folder confinement are) — it's enforced by
+  Google's own OAuth server. A `gmail.readonly` token literally cannot
+  be used to send, delete, archive, or modify anything, regardless of
+  what the model asks for or what bugs might exist in this tool's code.
+  That's a stronger safety property than anything sandboxing alone
+  provides for the file tools, since it doesn't depend on this codebase
+  getting its own validation right.
+- **Consequence**: a wrong or overly broad search is the worst case here
+  — an irrelevant result relayed to the user, not a destructive action.
+  That's the same risk shape as `get_system_usage` (Milestone 19 Part
+  A), not the same risk shape as `run_script`. `requiresConfirmation`
+  stays unset for the same reason it's unset on the file tools and
+  `get_system_usage` — setting it here would document a gate that
+  protects against a risk this tool doesn't actually carry.
+- **If this ever grows into sending or modifying email**, that's a
+  different tool with a different OAuth scope, and it would need the
+  same real design work Part B (`run_script`) is already blocked on —
+  this decision doesn't set a precedent for a future `send_email` tool
+  shipping the same way.
+
+**Metadata-only fetch, not full message bodies** — same reasoning as
+Milestone 19 Part A's one-PowerShell-round-trip choice: fetch only what
+the model needs to relay an answer. `format: "metadata"` with an
+explicit `metadataHeaders` list (From/Subject/Date) plus Gmail's own
+`snippet` field (a short, Gmail-generated preview) is enough to answer
+"do I have new mail" or "any emails from priya" without pulling full
+email bodies into the LLM's context — cheaper, faster, and avoids
+handing more of the user's email content to the local LLM than the
+question actually calls for.
+
+**One-time OAuth setup script (`scripts/gmail-auth.js`, `npm run
+setup:gmail`), same shape as `scripts/download-hand-model.js`** — a
+visible, described, user-initiated step rather than anything automatic,
+consistent with this project's stance (`CLAUDE.md`) on never running
+setup without describing it first. The refresh token is printed to the
+terminal for the user to paste into `.env` themselves, not written to
+`.env` automatically — same pattern already established for Piper's
+paths and the ElevenLabs key, so credential handling stays consistent
+across the project rather than this one tool inventing a new pattern.
+`googleapis` (the official Google API client) was the natural dependency
+choice — the alternative (hand-rolling OAuth2 token exchange and REST
+calls against Gmail's API) would be reinventing a well-maintained
+library for no real benefit.
+
+**`intentRouter.ts` deleted in this same patch** — flagged in
+`architecture.md` as a "candidate for deletion once Milestone 9 is
+confirmed solid on the user's real machine" back when it was written;
+that confirmation came in this session (Milestone 9 step 7's three test
+cases, all confirmed). Grepped the whole codebase first to confirm
+nothing actually imports it anymore (only comments referenced it,
+descriptively) before removing it — the handful of stale comments that
+described it as still-live (in `tools.ts`, `llm.ts`, `window.ts`,
+`openApp.ts`, `volume.ts`) were updated in the same patch rather than
+left pointing at a file that no longer exists.
+
+## Milestone 10 Part D: memory design, and the reliability risk taken on knowingly
+
+Scoped in conversation before building anything, since the shape of a
+memory system determines whether it's useful or just noise. Three real
+forks, each decided explicitly rather than defaulted:
+
+**What counts as memory**: facts/preferences AND project context,
+noticed automatically — not narrowed to just explicit facts.
+
+**Capture: automatic, not explicit-only.** The recommendation going in
+was explicit-only ("remember that..."), reasoning by direct analogy to
+the write_file/defer_to_planner finding above: a small local model
+overestimating its own judgment about what's "worth" doing unprompted is
+the same failure mode whether the stakes are a game's code or the user's
+personal data. That recommendation was turned down in favor of full
+automatic capture — logged here so a future session sees this as a
+considered choice, not a lapse. The architecture still shaped how
+"automatic" had to work: Proxy has no multi-turn "session" concept (every
+hotkey press is one self-contained interaction), so "automatic, after
+conversations" necessarily means *after every single interaction*, not
+after some session boundary that doesn't exist here. Runs as a background
+call, fired after the reply is already spoken — never awaited into the
+reply path, so it can't add latency to what the user is waiting for.
+
+**Extraction runs on the smart tier, not the fast tier** — the one place
+in this design that pushed back toward caution: given automatic capture
+was the chosen direction, judgment quality on "is this actually worth
+remembering long-term" matters more than latency, since nothing is
+waiting on the result. `think: true`, same as the smart tier's identity
+everywhere else in this codebase.
+
+**No manual override for v1** (no `remember_fact`/`forget_fact` tools) —
+also a deliberate choice, not an oversight: a bad automatic capture just
+sits in the list until pruned rather than being correctable. A real known
+limitation, not solved here.
+
+**Recall: a model-invoked tool (`recall_facts`), not always-injected.**
+This is the second deliberate acceptance of the exact reliability risk
+already surfaced by the write_file/defer_to_planner finding above — a
+small model has to actually *choose* to call `recall_facts` for it to do
+anything. The safer technical default (always inject the full capped
+list into every prompt, avoiding any dependence on the model's own
+judgment about when to look something up) was raised and explicitly
+turned down. Both memory-reliability risks in this feature (automatic
+capture's judgment call, and recall's on-demand invocation) were chosen
+with the tradeoff stated plainly first — this is not the same as the
+write_file case, where the risk wasn't recognized as a design decision
+until it had already caused a bad outcome (Flappy Bird). `recall_facts`
+is marked `resultInformsNextStep: true` — the first tool to actually use
+that field (see orchestrator.ts's docblock, which anticipated this exact
+"check X" shape before any tool needed it) — since a raw fact list is
+usually raw material for an answer, not the answer itself.
+
+**Storage**: a flat local JSON file, `~/.proxima/memory.json` by default
+(`PROXY_MEMORY_FILE` overridable, same pattern as
+`PROXY_WORKSPACE_DIR`) — deliberately NOT inside the workspace folder,
+since that folder is "files Proxy wrote that the user asked for," not
+Proxy's own internal state. No categories, no embeddings — a flat
+capped list (30 entries, oldest pruned first) matches this codebase's
+established "boring and vanilla" bar at the scale this actually needs.
+Exact-text dedup only (an incoming fact identical to a stored one is
+dropped) — no contradiction handling ("likes coffee" then later "gave up
+coffee" both just sit in the list); a real known limitation, not solved
+here, since a real fix would need structured fact-keying (category/key/
+value) rather than free-text blobs, and that's a bigger redesign than
+this slice's scope justified.
+
+**`chat()` gained an optional `systemPromptOverride`** (`core/llm.ts`)
+so the extraction call isn't forced through the Proxy-persona system
+prompt ("You are Proxy, a local voice assistant...") for a task that
+never reaches the user as a reply at all. Worth being explicit about why
+this doesn't undermine `chat()`'s own documented "one system prompt, no
+drift" design principle: that principle is about Proxy not developing
+two different personas depending on which code path is talking to the
+user. This isn't a second persona — it's Proxy's own backend running an
+internal analysis task that was never a conversation with the user in
+the first place. Left optional and undocumented to ordinary callers on
+purpose, specifically so it doesn't become a tempting escape hatch for
+some future caller that actually IS replying to the user.
+
+**Test-writing pitfall worth flagging for future sessions — theory
+revised twice, be conservative here.** First occurrence:
+`core/memory.test.ts` set `process.env.PROXY_MEMORY_FILE` with a plain
+statement textually before `import { ... } from "./memory"` — the same
+pattern `fileTools.test.ts` already uses successfully for
+`PROXY_WORKSPACE_DIR`. It silently failed there because that test file
+also uses `vi.mock("./llm", ...)` for a dependency of the module under
+test, and the original theory logged here was "`vi.mock`/`vi.hoisted`
+hoisting is the trigger — safe without one."
+
+**That theory was wrong, or at least incomplete** —
+`commands/runScript.test.ts` hit the exact same symptom (a workspace-root
+env var silently not taking effect before `fileTools.ts`'s module-level
+constant read it) with **no `vi.mock` anywhere in the file**. The only
+difference from `fileTools.test.ts`'s working case: `runScript.test.ts`
+imports `./runScript`, which transitively imports `./fileTools`, rather
+than importing `./fileTools` directly — root cause not fully pinned down
+(a Vite dependency-pre-bundling reorder for the transitive case is the
+leading guess, not confirmed), and not worth burning more time on given
+a fix that works regardless of the exact mechanism.
+
+**Standing rule, revised again — this time from a real, previously-
+undetected bug, not just a close call.** The line above ("`fileTools.
+test.ts`'s own plain-statement pattern still works, confirmed still
+passing") was checked the wrong way and was wrong. Discovered while
+independently verifying Part B's patch: `~/ProxyWorkspace` — the real
+default workspace folder, on whatever machine runs `npm test` — was
+getting real files written into it (`flappybird.html`, `games/snake.js`,
+`note.txt`, `script.py`) on every single test run, every session, this
+entire time. `fileTools.test.ts` has both a `vi.mock` (for `./launch`)
+*and* the plain-statement `process.env.PROXY_WORKSPACE_DIR = ...` before
+its import of `./fileTools` — the exact vulnerable shape already
+described above — and the env var was never actually taking effect. The
+tests still passed throughout because they check the written path
+against `getWorkspaceRoot()` on *both* sides of the assertion: if
+`getWorkspaceRoot()` itself resolves to the wrong (real, default) path,
+the assertion comparing "where was it actually written" against "what
+does `getWorkspaceRoot()` say" trivially agrees with itself regardless
+of whether workspace isolation is doing anything at all. A self-
+referential check can't catch its own reference point being wrong.
+Fixed the same way as the other two instances (env var moved inside
+`vi.hoisted()`'s callback); confirmed after the fix that a full
+`npm test` run no longer touches `~/ProxyWorkspace` at all.
+
+**Revised standing rule**: treat "set env var via a plain statement
+before an import" as *not* a safe pattern in this codebase's test suite,
+full stop — not "safe unless X," not "safe for direct imports." Three
+independent instances of the same failure (`core/memory.test.ts` with
+`vi.mock`; `runScript.test.ts` with no `vi.mock` at all, transitive
+import; `fileTools.test.ts` with `vi.mock`, direct import, silently
+broken for an unknown length of time before this) is enough occurrences
+across enough different shapes that the pattern itself should be
+considered unreliable in this toolchain, not any particular variant of
+it. `vi.hoisted()`'s callback is the one mechanism with an actual
+documented guarantee here; use it for any env var a test needs a module
+to see before that module's own top-level code runs, every time, with
+no exceptions carved out for "no `vi.mock`" or "direct import." Also:
+tests that verify path/output values by re-deriving the expected value
+from the same function under test (as `fileTools.test.ts` did with
+`getWorkspaceRoot()`) can pass while checking nothing meaningful about
+correctness — worth a second look at any test whose "expected" value is
+computed by calling the code being tested, rather than an independently
+known value.
+
+## Milestone 10 Part B: run_script's confirmation mechanism — decided and built
+
+The design question this tool was blocked on (see the Part A entry
+above): does confirmation happen by voice, a dashboard button, or does
+the orchestrator loop pause mid-run and wait? Decided in conversation
+before building anything, same as Part D's memory design.
+
+**Chosen: voice confirmation via a separate, following turn — not an
+inline pause mid-orchestrator-run.** The deciding factor was
+architectural, not a preference call: this app has no multi-turn
+"session" or open-mic concept anywhere else — Part D's memory design
+already established this for the same underlying reason (every hotkey
+press is one self-contained interaction, full stop). Making the
+orchestrator loop genuinely pause mid-flight and wait for a follow-up
+utterance would mean building a "stay listening" mode this app doesn't
+have anywhere in its architecture — a materially bigger lift than the
+tool itself. A follow-up turn, by contrast, is something this app
+already does effortlessly: it's just the next hotkey press. Building
+Part B's confirmation flow around a capability the app doesn't have
+would have meant solving two hard problems (arbitrary code execution
+safety, and open-mic session management) to ship one feature; building
+it around a capability the app already has meant solving exactly one.
+
+**Mechanism**: `run_script`'s `execute()` (`runScript.ts`) never runs
+anything itself. It validates the request (workspace-relative path via
+`fileTools.ts`'s `resolveInWorkspace()`, extension in `{.js, .py}`, file
+must already exist) and, if valid, stores exactly one pending
+confirmation in module-level state — there's only ever one Proxy, one
+thing it can be waiting on at a time, no need for anything fancier than
+a single variable. The reply asks for a yes/no. `engine.ts`'s
+`process()` checks `tryResolvePendingConfirmation()` as the very first
+thing on every subsequent turn, before the regex router or the
+orchestrator ever see the new utterance.
+
+**The confirmation window is exactly one utterance wide, not
+time-based**: a clear yes runs it, a clear no cancels it, and anything
+else — including a totally unrelated new request like "open notepad" —
+silently drops the pending confirmation and lets that utterance be
+processed normally as a fresh request. No timeout, no expiry clock. This
+was a deliberate choice over the more obvious "expires after N minutes"
+design: a time window can still be caught out by a stray "yes" said
+minutes later for a completely unrelated reason; a single
+non-matching-utterance window can't be, structurally, regardless of how
+long the user takes to say something else. Simpler to implement and
+harder to get wrong, at no real cost — nobody confirms a script run with
+a several-minute pause before answering yes or no anyway.
+
+**Classification is plain keyword matching, not an LLM call.** Yes/no
+recognition for a handful of common phrasings ("yes," "confirm," "run
+it" vs. "no," "cancel," "stop") is exactly the kind of deterministic
+task that doesn't need one — and legibility matters more here than
+almost anywhere else in the codebase, since this is the one place a
+misclassification could mean running code the user didn't actually
+confirm. An LLM call would also reintroduce the exact reliability
+question this whole feature is designed to route around.
+
+**Execution**: `execFile`'s async/callback form — never
+`execFileSync` — specifically because this session already found a real
+hang (STT blocking Electron's main process synchronously causes
+Windows' "not responding" dialog; see project-status.md's Known
+Limitations). A script that ran synchronously here would risk the exact
+same failure mode for an unrelated reason. `execFile`'s `timeout` option
+(configurable via `PROXY_SCRIPT_TIMEOUT_MS`, default 15s) kills a
+runaway script rather than letting Electron hang waiting on it
+indefinitely. Output capped at 500 characters in the spoken reply —
+applying the `get_system_usage` over-verbosity lesson (Known
+Limitations) to brand-new code from the start, rather than shipping the
+same mistake again and fixing it later.
+
+**Scope held to what decisions.md already ruled out**: no shell string,
+no arguments — `node` or `python` (by extension) on exactly one
+workspace-relative path. Extending this to accept script arguments was
+considered and rejected for now: it would reopen a version of the same
+injection surface a shell string would, for a case ("run this specific
+script with no arguments") that already covers the overwhelming majority
+of "write me a script and run it" requests.
+
+**`requiresConfirmation: true` is documentation, not enforcement** — see
+the field's own updated docs in `tools.ts`. There still isn't a generic
+orchestrator-level confirmation gate; this tool satisfies the property
+entirely through its own design. A future tool needing confirmation for
+a different kind of action would need either its own version of this
+same pattern, or a genuinely generic gate built once there's a second
+real use case to generalize from.
+
+**Dashboard/CLI transparency**: a new `awaiting-confirmation` event
+(and a `"confirmation"` source added to the existing `routed` event,
+rather than a second new event for the resolution half) makes the
+waiting state visible in both the dashboard's Activity panel and the
+CLI's console log — not just implied by the reply text. Consistent with
+the rest of this codebase's transparency principle: a script silently
+sitting there waiting for a yes/no, with zero visible indication
+anywhere that anything is pending, would be its own quiet form of
+dishonesty even though nothing false would technically be claimed.
+
+## Milestone 13, first slice: persisted session log
+
+Chosen as the next milestone with the user explicitly delegating the
+pick ("be creative and choose for me"). Reasoning for the choice itself:
+every credential/config added this session (`GMAIL_CLIENT_ID`,
+`PROXY_MEMORY_FILE`, `PROXY_SCRIPT_TIMEOUT_MS`, on top of the existing
+`PROXY_WORKSPACE_DIR`) lives in `.env` only, and the dashboard's SESSION
+LOG card resets to empty on every relaunch — the two rough edges
+Milestone 13 already names. Picked over Maps/Bluetooth (both need real
+Windows-API research first) and the STT rewrite (explicitly needs the
+user's go-ahead, not a default to just start).
+
+Split into two independent pieces rather than attempted together: this
+session built the **persisted session log** half only. The **settings
+UI** half (an actual in-app editor for what's currently `.env`-only) is
+separate, larger, and not started — it also raises a real design
+question of its own (does editing a setting take effect live, or only
+after a restart, given nearly everything in this codebase reads its
+config once at module load time?) that deserves its own decision instead
+of an implicit default.
+
+**Design: main.ts persists, renderer.js formats — deliberately not
+duplicated in both places.** All the logic that decides *what the
+SESSION LOG card's text actually says* (`describeRoute()`, the specific
+wording for "listening"/"busy"/"no-speech"/etc.) already lives in
+`renderer.js`'s `appendLog()` call sites. Two ways to persist that same
+text: have `main.ts` reconstruct the same formatting independently, or
+have the renderer mirror the *already-formatted* `{kind, text}` pair
+back to `main.ts` over a new IPC verb (`persistLogEntry`) right when it
+renders it live. Chose the second — a second independent place deciding
+how to phrase the same event is a real drift risk (the two could quietly
+diverge over time, e.g. if `describeRoute()`'s wording changes and
+whoever changes it doesn't know a second copy exists), while the first
+approach makes `core/sessionLog.ts` genuinely dumb: it only ever stores
+and returns `{kind, text, timestamp}`, never interprets any of it.
+
+**Hydration timing follows the exact precedent that already exists for
+"ready".** `main.ts` already has a documented, previously-fixed bug
+class here: `webContents.send()` is fire-and-forget, and sending
+anything before the renderer's page has actually finished loading (and
+its `ipcRenderer.on()` listeners are attached) silently drops the
+message with no error and no retry — this is exactly what happened to
+"ready" once, per that event's own existing comment. The new
+`"proxy:log-history"` send follows the identical fix: sent only after
+`Promise.all([engine.init(), pageLoaded])` resolves, in the same spot,
+right before "ready" — not because order matters much functionally
+here, but because it was the natural place to avoid reintroducing a bug
+that's already been found and fixed once.
+
+**Historical entries carry their real original timestamp, not "now."**
+`appendLog()` gained an `opts.timestamp` override specifically so a
+replayed entry from yesterday shows yesterday's time. This is the same
+transparency instinct that runs through the rest of this codebase
+applied to a new case: a fake "just happened" timestamp on something
+that already happened would be a small, specific dishonesty, not just a
+missing nicety.
+
+**A plain divider (`"— new session —"`), not a bigger visual treatment.**
+Marks where replayed history ends and this session's live entries begin,
+so scrolling back never quietly reads as "one continuous session" when
+it wasn't — without inventing a whole "session" concept in the UI that
+doesn't exist anywhere else in this app's architecture (see Part D's and
+Part B's docblocks for why this app deliberately has no multi-turn
+session concept at all).
+
+**Cap and prune, same shape as `core/memory.ts`'s facts store**: 500
+entries, oldest dropped first, plain flat JSON at
+`~/.proxima/session-log.json` (`PROXY_SESSION_LOG_FILE` overridable).
+No categorization, no search — matches this codebase's established bar
+for what actually needs more than a flat list at this scale.
+
+**Test file follows this session's revised standing rule from the
+start**, rather than needing a second bug to teach it: `env var set
+inside vi.hoisted()`, even though `sessionLog.test.ts` has no `vi.mock`
+at all. One test originally planned (does `appendLogEntry` swallow a
+real write failure) was cut before it shipped, not after — `LOG_FILE` is
+a frozen module-level constant, so reassigning `process.env` mid-test
+has no effect on it, and a test written that way would have passed for
+the wrong reason (nothing was actually broken) rather than testing what
+its name claimed. Better to have no test here than one that looks like
+coverage but isn't.
 
 ## Milestone 19 Part A: query tools are a new shape, not just another action tool
 

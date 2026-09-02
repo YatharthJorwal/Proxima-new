@@ -3,14 +3,15 @@
  *
  * Single source of truth for what tools exist, their LLM-facing schemas,
  * and how to actually run them. Pulled out of intentRouter.ts (which
- * used to own an inline TOOLS array + switch statement) so both the
- * existing single-shot router and orchestrator.ts (later in this
- * milestone) share exactly one definition per tool instead of two
+ * used to own an inline TOOLS array + switch statement, until that file
+ * was deleted once Milestone 9 was confirmed working — see decisions.md)
+ * so orchestrator.ts has exactly one definition per tool instead of
  * copies that could quietly drift apart.
  *
- * Pure refactor — no behavior change. Same three tools, same schemas,
- * same dispatch logic, just relocated and given real types instead of
- * an untyped array passed through `as any`.
+ * Started as a pure refactor of three tools with no behavior change;
+ * every tool since (file tools, query tools, Gmail, memory, run_script)
+ * has been added here as the single place a tool needs to be registered
+ * to reach both the fast and smart tier.
  */
 
 import { Tool } from "ollama";
@@ -20,6 +21,9 @@ import { executeWindow, WindowAction } from "./window";
 import { executeBrowse, getBrowseSites } from "./browse";
 import { executeWriteFile, executeOpenPath } from "./fileTools";
 import { executeGetSystemUsage } from "./systemUsage";
+import { executeGetEmails } from "./gmail";
+import { executeRecallFacts } from "./memory";
+import { executeRunScript } from "./runScript";
 
 export interface ProxyTool {
   /** The LLM-facing schema — name, description, parameters. Sent to Ollama as-is. */
@@ -36,11 +40,20 @@ export interface ProxyTool {
   resultInformsNextStep?: boolean;
   /**
    * True if this tool needs a "are you sure?" confirmation before
-   * running. Default false — nothing in the current tool set is
-   * destructive enough to need this. The hook exists so a future tool
-   * (delete file, send email, whatever Milestone 10+ brings) can flip
-   * it on without redesigning the loop. Deliberately no interactive
-   * confirm-and-wait UX built yet — no current consumer for it.
+   * running for real. Default false — nothing else in the current tool
+   * set is destructive enough to need this.
+   *
+   * First real consumer: `run_script` (Milestone 10 Part B, runScript.ts)
+   * — but this field is documentation of that property, not something
+   * orchestrator.ts reads and enforces. There's still no generic
+   * confirm-and-wait gate here; `run_script` satisfies "requires
+   * confirmation" entirely through its own design (its execute() never
+   * runs anything, just registers a pending confirmation that a
+   * *separate following turn* resolves — see runScript.ts's docblock for
+   * the full mechanism and why a follow-up turn, not a mid-run pause). A
+   * different future tool needing confirmation would need its own
+   * version of that same pattern, or a genuinely generic gate built
+   * later — this flag alone doesn't grant one.
    */
   requiresConfirmation?: boolean;
   /** Actually run the tool with the arguments the model provided. Returns what Proxy should say. */
@@ -156,11 +169,9 @@ export const TOOLS: Record<string, ProxyTool> = {
   // Milestone 10 Part A — see fileTools.ts's docblock for the full
   // sandboxing story (workspace-folder confinement, extension
   // allowlists, why open_path won't touch .js/.py). Neither tool is
-  // flagged requiresConfirmation: that field exists but nothing enforces
-  // it yet (see the field's own docs above) - sandboxing is what keeps
-  // these two safe to ship now, not a confirmation gate. A real
-  // requiresConfirmation-honoring tool (like a future run_script) needs
-  // that gate built first.
+  // flagged requiresConfirmation: sandboxing is what keeps these two
+  // safe to ship, not a confirmation gate — see run_script below for the
+  // tool that actually needed one.
   write_file: {
     schema: {
       type: "function",
@@ -225,6 +236,101 @@ export const TOOLS: Record<string, ProxyTool> = {
     },
     execute: async () => executeGetSystemUsage(),
   },
+
+  // Milestone 10 Part C — Gmail slice. A second query tool (see
+  // get_system_usage above for the query-vs-action distinction) and the
+  // first that needs one-time user setup (OAuth) before it works at all
+  // - see gmail.ts's docblock for why that doesn't need
+  // requiresConfirmation the way a future run_script tool will.
+  get_emails: {
+    schema: {
+      type: "function",
+      function: {
+        name: "get_emails",
+        description:
+          "Check or search the user's Gmail inbox - e.g. 'do I have any new emails', 'any emails from priya', 'check for emails about the invoice'. query is optional Gmail search syntax (e.g. 'is:unread', 'from:priya@example.com', 'subject:invoice') - omit it to just get the most recent inbox messages. Returns sender, subject, and a short preview only, never the full email body.",
+        parameters: {
+          type: "object",
+          properties: {
+            query: {
+              type: "string",
+              description: "Gmail search syntax, e.g. 'is:unread' or 'from:priya@example.com'. Omit for the most recent messages.",
+            },
+            max_results: {
+              type: "number",
+              description: "How many emails to return, 1-10. Defaults to 5.",
+            },
+          },
+        },
+      },
+    },
+    execute: async (args) =>
+      executeGetEmails({
+        query: args.query ? String(args.query) : undefined,
+        max_results: typeof args.max_results === "number" ? args.max_results : undefined,
+      }),
+  },
+
+  // Milestone 10 Part D — the first tool to actually use
+  // resultInformsNextStep (see that field's docs above, and
+  // orchestrator.ts's docblock, which anticipated this exact shape before
+  // any tool needed it). Recalled facts are raw material for an answer,
+  // not the answer itself - the smart tier needs a pass over the result
+  // to compose a real reply, not have it read back verbatim. Facts
+  // themselves are captured automatically, not through this tool - see
+  // core/memory.ts.
+  recall_facts: {
+    schema: {
+      type: "function",
+      function: {
+        name: "recall_facts",
+        description:
+          "Check what you already know about the user or their ongoing projects from past interactions - e.g. 'what's my dog's name', 'what do you know about my Ledger project'. query is an optional keyword to narrow the search (e.g. 'dog', 'Ledger'); omit it to get everything currently remembered.",
+        parameters: {
+          type: "object",
+          properties: {
+            query: {
+              type: "string",
+              description: "Optional keyword to filter remembered facts by. Omit to get everything remembered.",
+            },
+          },
+        },
+      },
+    },
+    resultInformsNextStep: true,
+    execute: async (args) => executeRecallFacts({ query: args.query ? String(args.query) : undefined }),
+  },
+
+  // Milestone 10 Part B — the tool this whole confirmation mechanism was
+  // built for. Fire-and-forget like write_file (its own return text IS
+  // the final reply) — NOT resultInformsNextStep, since both the
+  // confirmation-request reply and the eventual run-result reply are
+  // meant to be spoken exactly as returned, not composed further by the
+  // smart tier. See runScript.ts's docblock for the full confirmation
+  // design and why requiresConfirmation here doesn't route through any
+  // generic orchestrator-level gate.
+  run_script: {
+    schema: {
+      type: "function",
+      function: {
+        name: "run_script",
+        description:
+          "Run a script that already exists in the workspace (usually one written earlier with write_file) - e.g. 'run that script', 'execute test.py'. Only .js (via node) and .py (via python) are supported. This does NOT execute immediately - it asks for a yes/no confirmation first, and only actually runs the script if the user confirms in their next reply.",
+        parameters: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Workspace-relative path to the script to run, e.g. 'game.js' or 'analyze.py'.",
+            },
+          },
+          required: ["path"],
+        },
+      },
+    },
+    requiresConfirmation: true,
+    execute: async (args) => executeRunScript({ path: args.path ? String(args.path) : undefined }),
+  },
 };
 
 /** All tool schemas, in the shape Ollama's `tools` chat param expects. */
@@ -234,10 +340,11 @@ export function getToolSchemas(): Tool[] {
 
 /**
  * Runs a tool the model asked for, by name. Throws if the name isn't
- * recognized — callers decide how to handle that (intentRouter.ts today,
- * orchestrator.ts later, both wrap this in their own try/catch, since
+ * recognized — orchestrator.ts (the sole caller today; the original
+ * caller, intentRouter.ts, was deleted once Milestone 9 was confirmed
+ * working — see decisions.md) wraps this in its own try/catch, since
  * "the model asked for a tool that doesn't exist" should fail gracefully
- * with a spoken reply, not crash the pipeline).
+ * with a spoken reply, not crash the pipeline.
  */
 export async function dispatchTool(name: string, args: Record<string, unknown>): Promise<string> {
   const tool = TOOLS[name];

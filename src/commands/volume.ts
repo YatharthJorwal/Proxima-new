@@ -81,8 +81,9 @@ export type VolumeDirection = "up" | "down" | "mute" | "unmute";
 
 /**
  * Does the actual work of adjusting volume, given a direction. Shared by
- * the regex handler below and, as of Milestone 5, the LLM tool-call path
- * in commands/intentRouter.ts.
+ * the regex handler below and the LLM tool-call path (originally
+ * commands/intentRouter.ts as of Milestone 5; deleted once Milestone 9's
+ * orchestrator.ts/tools.ts replaced it — see decisions.md).
  */
 export async function executeVolume(direction: VolumeDirection): Promise<string> {
   let vk: string;

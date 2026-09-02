@@ -40,7 +40,12 @@ const MODEL_BY_TIER: Record<ModelTier, string> = {
 // it deliberately told the model not to guess a name if asked, rather
 // than risk confabulating one — that held up in testing (asked "who's
 // your creator," got an honest "I wish I knew" instead of a made-up
-// name).
+// name). Extended later (real-machine testing again — "who am i" got a
+// rambling, generic answer) to explicitly say the user talking to Proxy
+// IS Yatharth, not just that Yatharth is "the creator" as some separate
+// fact — the model wasn't connecting those on its own. "Sir" added at
+// the same time, both hardcoded rather than derived, since this is a
+// single-user personal project where that's simply always true.
 // ---------------------------------------------------------------------
 
 const PERSONALITY = `You have some personality - a little dry wit is welcome - but you are not a
@@ -53,7 +58,13 @@ quotes - plain words and plain punctuation only. Every reply gets spoken
 aloud by a local TTS model, not read as text.`;
 
 const CREATOR_BIO = `Your creator is Yatharth, who built you (Proxima) as a personal project.
-Refer to him by name when it's natural to, don't force it into every answer.`;
+The person you're talking to right now IS Yatharth - this is his own
+single-user project, not a public product, so there's no one else it
+could be. If asked something like "who am I" or "who are you talking
+to," answer with his name directly rather than describing him generically
+as "a user" or "someone who uses this." Address him as "sir" when it
+feels natural, not forced into every sentence. Refer to him by name when
+that's natural too, don't force that either.`;
 
 function buildSystemPrompt(hasTools: boolean): string {
   const toolGuidance = hasTools
@@ -96,6 +107,19 @@ export interface ChatOptions {
   tools?: Tool[];
   /** Request a reasoning trace back (message.thinking). Forced to false on the fast tier regardless of what's passed here — see chat()'s docblock. */
   think?: boolean;
+  /**
+   * Replaces the default Proxy-persona system prompt entirely, for
+   * internal calls that aren't Proxy talking to the user at all — e.g.
+   * memory.ts's background fact-extraction pass (Milestone 10 Part D).
+   * That call isn't a second version of "who Proxy is" (the exact drift
+   * this file's single-buildSystemPrompt() design otherwise guards
+   * against, per chat()'s docblock) — it's Proxy's own backend running
+   * an analysis task that never reaches the user as a reply. Left
+   * optional and undocumented to ordinary callers on purpose: anything
+   * that IS a reply to the user should keep going through
+   * buildSystemPrompt() like every other caller here.
+   */
+  systemPromptOverride?: string;
 }
 
 /**
@@ -118,7 +142,10 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
   const response = await ollama.chat({
     model: MODEL_BY_TIER[opts.tier],
     messages: [
-      { role: "system", content: buildSystemPrompt(Boolean(opts.tools && opts.tools.length > 0)) },
+      {
+        role: "system",
+        content: opts.systemPromptOverride ?? buildSystemPrompt(Boolean(opts.tools && opts.tools.length > 0)),
+      },
       ...opts.messages,
     ],
     tools: opts.tools,
@@ -144,14 +171,16 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
 // ---------------------------------------------------------------------
 // Back-compat wrappers around chat().
 //
-// commands/intentRouter.ts still calls askProxyWithTools() directly —
-// it gets replaced by orchestrator.ts in a later Milestone 9 step, not
-// this one, so this file shouldn't force a change there yet. Both
-// wrappers below preserve the exact old behavior (single smart-tier
-// call, no thinking requested) so intentRouter.ts needed zero changes
-// for this patch — the only thing that changes for it is the improved
-// personality prompt, which it gets automatically since chat() owns the
-// system prompt now.
+// Originally kept so commands/intentRouter.ts (Milestone 5's single-shot
+// router) didn't need to change when chat() was rewritten for Milestone
+// 9's two-tier setup. intentRouter.ts has since been deleted (Milestone
+// 9 is confirmed working on orchestrator.ts/tools.ts instead — see
+// decisions.md), so these two currently have no caller anywhere in the
+// codebase. Left in rather than deleted alongside it: unlike
+// intentRouter.ts, nothing here was ever flagged as dead weight to clean
+// up, and a plain conversational call / single-shot tool call is a
+// reasonable thing a future feature (a dashboard chat panel, say) might
+// still want without going through the full orchestrator loop.
 // ---------------------------------------------------------------------
 
 export interface ProxyToolResponse {
@@ -160,10 +189,11 @@ export interface ProxyToolResponse {
 }
 
 /**
- * Plain conversational call, no tools. Not currently used anywhere
- * (assistant.ts goes through askProxyWithTools for its fallback path) —
- * kept around for anywhere that wants a straight LLM reply without
- * command-dispatch overhead, e.g. a future dashboard chat panel.
+ * Plain conversational call, no tools. Not currently used anywhere —
+ * assistant.ts and the dashboard both go through engine.ts's
+ * orchestrator now, not this. Kept around for anywhere that wants a
+ * straight LLM reply without command-dispatch overhead, e.g. a future
+ * dashboard chat panel.
  */
 export async function askProxy(userText: string): Promise<string> {
   const result = await chat({

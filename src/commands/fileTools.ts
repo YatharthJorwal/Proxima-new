@@ -26,14 +26,12 @@
  *     to do with that extension is a different risk entirely. Full
  *     reasoning: decisions.md.
  *
- * What this deliberately does NOT do: actually run code. A `run_script`
- * tool (invoke a specific known interpreter - `node`, `python` - on a
- * workspace file, not an arbitrary shell string) is the natural next
- * step for "write me a Python script and run it," but that needs a real
- * confirm-and-wait mechanism first, which doesn't exist yet. Shipping it
- * without one would mean either lying about `requiresConfirmation` or
- * giving the model unsupervised process-execution - neither acceptable.
- * See decisions.md.
+ * What this deliberately does NOT do: actually run code. That's
+ * `run_script` (`runScript.ts`) — Milestone 10 Part B, built once a real
+ * confirm-and-wait mechanism existed (see that file's docblock and
+ * decisions.md for the design). This file's `resolveInWorkspace()` is
+ * exported and reused there directly, so there's exactly one place that
+ * knows what counts as a safe workspace path.
  */
 
 import * as fs from "fs/promises";
@@ -73,8 +71,14 @@ const MAX_CONTENT_BYTES = 1_000_000;
  * confirms the result actually stays inside it. Returns null (not a
  * thrown error) on an unsafe path so callers can give a plain, honest
  * spoken reply instead of a stack trace.
+ *
+ * Exported as of Milestone 10 Part B (runScript.ts) — the same workspace-
+ * confinement check a script's path needs is exactly this one, and
+ * reimplementing it a second time would risk the two drifting apart on
+ * some future edge case. One place owns what counts as a safe workspace
+ * path.
  */
-function resolveInWorkspace(relPath: string): string | null {
+export function resolveInWorkspace(relPath: string): string | null {
   if (path.isAbsolute(relPath)) return null;
   const resolved = path.resolve(WORKSPACE_ROOT, relPath);
   if (resolved !== WORKSPACE_ROOT && !resolved.startsWith(WORKSPACE_ROOT + path.sep)) {

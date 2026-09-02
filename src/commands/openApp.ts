@@ -49,8 +49,9 @@ function normalize(name: string): string {
 
 /**
  * Does the actual work of opening an app, given a (possibly LLM-extracted)
- * app name. Shared by the regex handler below and, as of Milestone 5, the
- * LLM tool-call path in commands/intentRouter.ts — one place that knows
+ * app name. Shared by the regex handler below and the LLM tool-call path
+ * (originally commands/intentRouter.ts as of Milestone 5, now
+ * orchestrator.ts/tools.ts — see decisions.md) — one place that knows
  * how to actually launch an app; only how we *get* the app name differs.
  */
 export async function executeOpenApp(appNameRaw: string): Promise<string> {

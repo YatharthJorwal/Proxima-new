@@ -35,6 +35,14 @@
  * — Electron denies permission requests by default for a file:// origin.
  * See wireCameraPermission().
  *
+ * A fifth job as of Milestone 13: persist the SESSION LOG card's entries
+ * (via "proxy:persist-log-entry" from the renderer) so they survive a
+ * relaunch, and replay them back once at startup (see "proxy:log-history"
+ * below) — closing the "everything resets" rough edge project-status.md
+ * flagged for this milestone. main.ts doesn't format anything here; it
+ * just relays already-formatted {kind, text} pairs the renderer already
+ * rendered, straight through to core/sessionLog.ts.
+ *
  * contextIsolation stays on and nodeIntegration stays off (Electron
  * security defaults) — the renderer only talks to Node/Electron through
  * the narrow, explicit channels exposed in preload.ts. Not because we
@@ -49,6 +57,7 @@ import "dotenv/config";
 import { app, BrowserWindow, globalShortcut, ipcMain, session } from "electron";
 import * as path from "path";
 import { ProxyEngine, RouteInfo } from "../core/engine";
+import { appendLogEntry, loadLogHistory } from "../core/sessionLog";
 
 const HOTKEY = process.env.PROXY_HOTKEY || "F9";
 const MAX_TYPED_INPUT_LENGTH = 1000;
@@ -79,6 +88,7 @@ function wireEngineEvents() {
   engine.on("thinking", (trace) => send("proxy:thinking", trace));
   engine.on("responding", () => send("proxy:responding"));
   engine.on("routed", (info: RouteInfo) => send("proxy:routed", info));
+  engine.on("awaiting-confirmation", (info) => send("proxy:awaiting-confirmation", info));
   engine.on("reply", (text) => send("proxy:reply", text));
   engine.on("speaking", () => send("proxy:speaking"));
   engine.on("cancelled", () => send("proxy:cancelled"));
@@ -107,6 +117,16 @@ function wireRendererCommands() {
       return;
     }
     engine.runWithText(trimmed);
+  });
+
+  // Milestone 13 — fire-and-forget from the renderer's side (it's
+  // already shown the entry live; persistence is a background write, not
+  // something the UI waits on). Validated the same "don't trust our own
+  // renderer blindly" way as submit-text above, even though it's our own
+  // UI, not third-party input.
+  ipcMain.on("proxy:persist-log-entry", (_event, entry) => {
+    if (!entry || typeof entry.kind !== "string" || typeof entry.text !== "string") return;
+    void appendLogEntry(entry.kind, entry.text);
   });
 }
 
@@ -161,6 +181,14 @@ app.whenReady().then(async () => {
     mainWindow!.webContents.once("did-finish-load", () => resolve());
   });
   await Promise.all([engine.init(), pageLoaded]);
+
+  // Milestone 13 — same "wait for did-finish-load first" fix "ready"
+  // needed below: webContents.send() is fire-and-forget, so sending this
+  // any earlier risks the exact silent-drop bug already found and fixed
+  // for "ready". Sent before "ready" so history is in place before
+  // anything else announces the dashboard is live.
+  const history = await loadLogHistory();
+  send("proxy:log-history", history);
 
   send("proxy:ready", { hotkey: HOTKEY });
 

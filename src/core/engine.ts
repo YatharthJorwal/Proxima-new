@@ -40,6 +40,8 @@ import { ModelTier } from "./llm";
 import { normalizeForSpeech } from "./textForSpeech";
 import { tryHandleCommand, RegexCommandResult } from "../commands";
 import { Orchestrator } from "../commands/orchestrator";
+import { extractAndStoreMemories } from "./memory";
+import { tryResolvePendingConfirmation, getPendingConfirmation } from "../commands/runScript";
 
 // Milestone 8 (VAD) tuning knobs — optional .env overrides, same pattern
 // as PROXY_HOTKEY in electron/main.ts. Read here rather than in
@@ -70,7 +72,11 @@ const ORCHESTRATOR_MAX_STEPS = Number(process.env.PROXY_ORCHESTRATOR_MAX_STEPS) 
 export type RouteInfo =
   | { source: "regex"; handler: RegexCommandResult["handler"] }
   | { source: "llm-tool"; tools: string[] }
-  | { source: "conversation" };
+  | { source: "conversation" }
+  // Milestone 10 Part B — the utterance right after a run_script
+  // confirmation request, resolved before the regex router or the
+  // orchestrator ever see it. See runScript.ts's docblock.
+  | { source: "confirmation"; confirmed: boolean };
 
 export interface EngineEvents {
   busy: () => void; // trigger fired while a previous request was still running
@@ -110,6 +116,12 @@ export interface EngineEvents {
   // this — the orchestrator's own honest "Stopped — didn't finish
   // everything" text is what gets spoken, no special-casing needed here.
   cancelled: () => void;
+  // Milestone 10 Part B — fires right after an orchestrator run that
+  // called run_script, before the reply/speaking events for that same
+  // turn. The *next* turn's outcome (confirmed and ran, or cancelled)
+  // arrives via "routed" with source "confirmation", same as any other
+  // turn — no separate event needed for that half.
+  "awaiting-confirmation": (info: { path: string }) => void;
 }
 
 export declare interface ProxyEngine {
@@ -231,26 +243,58 @@ export class ProxyEngine extends EventEmitter {
 
   /** Shared tail: route -> reply -> speak. Used by both entry points above. */
   private async process(text: string): Promise<void> {
-    const regexResult = await tryHandleCommand(text);
+    const confirmation = await tryResolvePendingConfirmation(text);
 
     let reply: string;
-    if (regexResult !== null) {
-      this.emit("routed", { source: "regex", handler: regexResult.handler });
-      reply = regexResult.reply;
+    if (confirmation.handled) {
+      this.emit("routed", { source: "confirmation", confirmed: confirmation.confirmed! });
+      reply = confirmation.reply!;
     } else {
-      // Milestone 9 step 6: the orchestrator replaces the old single-shot
-      // intentRouter.ts call here. Its own deciding/tool-start/tool-result/
-      // thinking/responding events are already forwarded (see constructor)
-      // — this just needs its final result to build the one `routed` event
-      // and get the reply into the shared speak() tail below.
-      const result = await this.orchestrator.run(text, { maxSteps: ORCHESTRATOR_MAX_STEPS });
-      this.emit(
-        "routed",
-        result.toolsUsed.length > 0
-          ? { source: "llm-tool", tools: result.toolsUsed }
-          : { source: "conversation" }
-      );
-      reply = result.reply;
+      const regexResult = await tryHandleCommand(text);
+      if (regexResult !== null) {
+        this.emit("routed", { source: "regex", handler: regexResult.handler });
+        reply = regexResult.reply;
+      } else {
+        // Milestone 9 step 6: the orchestrator replaces the old single-shot
+        // intentRouter.ts call here. Its own deciding/tool-start/tool-result/
+        // thinking/responding events are already forwarded (see constructor)
+        // — this just needs its final result to build the one `routed` event
+        // and get the reply into the shared speak() tail below.
+        const result = await this.orchestrator.run(text, { maxSteps: ORCHESTRATOR_MAX_STEPS });
+        this.emit(
+          "routed",
+          result.toolsUsed.length > 0
+            ? { source: "llm-tool", tools: result.toolsUsed }
+            : { source: "conversation" }
+        );
+        reply = result.reply;
+
+        // Milestone 10 Part B — this run's reply is the confirmation
+        // *request* text (run_script's execute() never runs anything
+        // itself); surface that a script is now awaiting a yes/no on the
+        // next turn. Checked via getPendingConfirmation() rather than
+        // result.toolsUsed alone, since a pending confirmation is the
+        // actual state that matters here, not just which tool ran.
+        const nowPending = getPendingConfirmation();
+        if (nowPending) {
+          this.emit("awaiting-confirmation", nowPending);
+        }
+
+        // Milestone 10 Part D — fire-and-forget, deliberately not awaited:
+        // this must never add latency to the reply the user is already
+        // waiting on. Skipped for regex-matched commands entirely (this is
+        // inside the orchestrator branch only) since those are
+        // deterministic one-line actions ("open notepad") with nothing
+        // conversational to mine — and skipped on cancellation, since a
+        // cancelled run's reply is synthetic ("Stopped — didn't finish
+        // everything you asked"), not the model's own words, and reflects
+        // the user changing their mind rather than anything worth
+        // remembering. See core/memory.ts's docblock for what happens next
+        // and the reliability tradeoff this whole feature accepted.
+        if (!result.cancelled) {
+          void extractAndStoreMemories(text, reply);
+        }
+      }
     }
 
     // Applied once, here, regardless of which path produced the reply -
