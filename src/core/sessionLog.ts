@@ -76,3 +76,18 @@ export async function appendLogEntry(kind: string, text: string): Promise<void> 
     console.error("Failed to persist session log entry:", err);
   }
 }
+
+/**
+ * Backs the dashboard's "Clear" button. Writes an empty array rather than
+ * deleting the file - keeps loadLogHistory()'s read path uniform (an
+ * empty array either way) and avoids reintroducing an ENOENT case
+ * appendLogEntry's next write would just have to handle anyway.
+ */
+export async function clearLogHistory(): Promise<void> {
+  try {
+    await fs.mkdir(path.dirname(LOG_FILE), { recursive: true });
+    await fs.writeFile(LOG_FILE, JSON.stringify([]), "utf-8");
+  } catch (err) {
+    console.error("Failed to clear session log:", err);
+  }
+}

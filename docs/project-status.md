@@ -3,10 +3,11 @@
 Current milestone-by-milestone status. For *how* things work, see
 `architecture.md`; for *why* choices were made, see `decisions.md`.
 
-## ⚠️ One remaining flagged discrepancy (needs your confirmation)
+## Resolved discrepancies (kept for history)
 
 While reorganizing the original `CLAUDE.md`, two places where it
 contradicted itself (or was ambiguous about current truth) turned up.
+Both are now resolved.
 
 1. ~~**Milestone 9's true current step.**~~ — RESOLVED. Since this
    reorg happened, Milestone 9 moved forward for real: step 4
@@ -18,17 +19,14 @@ contradicted itself (or was ambiguous about current truth) turned up.
    Milestone 9 is fully done. `intentRouter.ts` itself has been deleted
    from the codebase (it was flagged as a deletion candidate once this
    confirmation landed — see `decisions.md`).
-2. **Camera card position.** The Milestone 7 entry in the original
-   numbered milestone list said: *"Pending UI tweak, not yet built: move
-   the Camera card to the bottom-left corner."* But the more detailed
-   Milestone 7 status notes, later in the same original file, said the
-   move **was** made. Checked directly against the actual code just now:
-   `index.html`'s left column really does order the cards Pipeline →
-   Input → Output → **Camera** → System Status → Session Log — the
-   Camera card genuinely sits below Output, confirming the code-level
-   claim. What's still outstanding is only the user's own visual
-   confirmation on their actual screen — please confirm you've seen it
-   there.
+2. ~~**Camera card position.**~~ — RESOLVED. The Milestone 7 entry in the
+   original numbered milestone list said: *"Pending UI tweak, not yet
+   built: move the Camera card to the bottom-left corner."* But the more
+   detailed Milestone 7 status notes, later in the same original file,
+   said the move **was** made. Checked directly against the actual code:
+   `index.html`'s left column really does order the cards Input → Output
+   → **Camera** → System Status → Session Log — confirming the
+   code-level claim. User has since confirmed seeing it there too.
 
 ## Roadmap snapshot
 
@@ -166,9 +164,8 @@ bespoke integration).
   tracking is great," per direct user feedback. The dynamic-import error
   isolation (see `architecture.md`) held up in practice too — no crash
   cascade into the rest of the dashboard during setup/testing.
-- **Camera card position** — see the flagged discrepancy at the top of this
-  file (code-level move confirmed; your visual confirmation is the only
-  thing still outstanding).
+- **Camera card position** — confirmed. See "Resolved discrepancies" near
+  the top of this file.
 - Implementation details (model download, vendoring, coordinate mapping,
   permission handling): `architecture.md`.
 
@@ -386,24 +383,128 @@ source once there's an actual portfolio to point it at — no Groww
 portfolio exists yet, so that piece stays exactly where it is in the
 roadmap until there's a real one.
 
-**Part D — memory slice built, not yet real-machine tested; gesture-to-action wiring still not started.** Scoped in
-conversation first (see `decisions.md` for the full design record,
-including two deliberate reliability tradeoffs taken on knowingly): facts,
-preferences, and project context are captured **automatically** — a
-background smart-tier call looks at each completed interaction after the
-user has already heard their reply and decides if anything durable is
-worth keeping, storing it in a flat capped local JSON file
-(`~/.proxima/memory.json`, `PROXY_MEMORY_FILE` overridable, 30-entry cap,
-oldest pruned first). No manual `remember_fact`/`forget_fact` override in
-v1 — a bad automatic capture just sits in the list until pruned, a real
-known limitation, not solved here. Recall happens through a new
-`recall_facts` tool the model calls on demand (plain substring matching,
-no embeddings) — the first tool marked `resultInformsNextStep: true`,
-since a raw fact list is material for an answer, not the answer itself.
-13 new unit tests (`core/memory.test.ts`, `commands/memory.test.ts`)
-cover storage/cap/dedup logic and the recall tool's filtering, all against
-mocked or real-temp-file boundaries — no real Ollama call has been
-verified to actually extract sensible facts from a real conversation yet.
+**Part D — memory — confirmed on the real machine, two real bugs found and fixed.**
+Scoped in conversation first (see `decisions.md` for the full design
+record, including two deliberate reliability tradeoffs taken on
+knowingly): facts, preferences, and project context are captured
+**automatically** — a background smart-tier call looks at each completed
+interaction after the user has already heard their reply and decides if
+anything durable is worth keeping, storing it in a flat capped local
+JSON file (`~/.proxima/memory.json`, `PROXY_MEMORY_FILE` overridable,
+30-entry cap, oldest pruned first). No manual `remember_fact`/
+`forget_fact` override in v1 — a bad automatic capture just sits in the
+list until pruned, a real known limitation, confirmed painfully in real
+use, not solved here. Recall happens through a `recall_facts` tool the
+model calls on demand (plain substring matching, no embeddings) —
+`resultInformsNextStep: true`, since a raw fact list is material for an
+answer, not the answer itself. 13+ unit tests (`core/memory.test.ts`,
+`commands/memory.test.ts`) cover storage/cap/dedup logic and the recall
+tool's filtering.
+
+Real-machine testing surfaced two genuine bugs, both fixed: (1) the smart
+tier occasionally put its entire answer into its internal `thinking`
+trace and left the actual reply empty — `orchestrator.ts` now falls back
+to an honest line instead of Proxy saying nothing; (2) `recall_facts`'s
+own tool description used a specific, plausible-sounding example project
+name ("...my Ledger project"), which the fast tier picked out of its own
+tool schema and hallucinated into a whole invented backstory when asked
+"what's up" — fixed by using a fully generic, non-proper-noun example
+instead, plus extending `llm.ts`'s existing anti-overclaiming rule (never
+say you did something a tool would be needed for) to cover memory
+specifically, since the model was also claiming to have "noted" or
+offering to "forget" facts with no write/delete tool to back either claim.
+
+**Part E — browser automation — done, confirmed working, real-machine
+tested via cursor-visible clicks.** Scoped through a full conversation
+(not defaulted on) after real-machine testing showed the actual limit
+wasn't "the model can't reason," it was "there's no tool for interacting
+with a webpage once it's open" (the concrete example: "play music by my
+mood" — `browse.ts` can open a search page, but nothing could click
+play). Three real decisions, asked rather than assumed, same posture as
+Part B's confirmation mechanism:
+
+1. **Drives the user's real Chrome profile**, not an isolated one — more
+   useful (real logins, no separate auth needed), higher stakes if it
+   clicks the wrong thing.
+2. **Confirmation only for committing actions** (submit/buy/delete/send),
+   not every click/type — otherwise even "search and hit play" becomes a
+   back-and-forth.
+3. **Visible, not headless**, with an animated cursor (smooth movement via
+   Playwright's `steps` option, plus a brief highlight ring at the click
+   point) — the user explicitly wants to watch it work and be able to
+   intervene in real time.
+
+Architecture: Chrome only allows one process per profile, so this
+ATTACHES via CDP (`chromium.connectOverCDP`, `playwright-core` — no
+bundled browser download needed) to an already-running Chrome rather
+than launching a competing instance. `config/commands.json`'s `chrome`
+entry now launches with `--remote-debugging-port=9222` (see `launch.ts`'s
+new optional `args` parameter, additive and backward-compatible with
+every existing plain-string app entry) so saying "open chrome" always
+sets this up correctly; if Chrome's already open without that flag,
+`connectOverCDP` fails and the tool says so honestly rather than hanging.
+The port number (9222) is duplicated between `commands.json` and
+`browserAutomation.ts` on purpose, not made configurable — a JSON config
+file can't read this file's constant or an env var, and the two having
+to always match by hand is a worse footgun than a plain, well-known,
+commented default.
+
+Four new tools (`browser_navigate`, `browser_read_page`, `browser_click`,
+`browser_type`), all `resultInformsNextStep: true` — every one returns a
+numbered list of the page's current interactive elements (tagged
+directly onto the DOM as `data-proxy-id`, so resolving a click target is
+one attribute selector, not fuzzy text matching) as context for the
+model's next decision, never something to speak verbatim — same "don't
+dump raw tool output" lesson already logged for `get_system_usage`.
+`browser_click`'s confirmation gate combines a keyword/element-type
+heuristic (conservative on purpose — false positives just cost one extra
+confirmation, false negatives could mean an unconfirmed purchase) with a
+`may_commit` flag the model can set itself; either signal triggers
+confirmation. The confirmation mechanism itself is Part B's exact
+pattern, not a new one — a pending click resolved on a separate following
+turn (see `runScript.ts`'s docblock for why) — with one difference: what's
+"pending" is a reference to an element on a page that's still open and
+unchanged, since the browser session persists between turns, so
+confirming just clicks it as-is rather than re-running a multi-step plan.
+The yes/no classifier itself was extracted from `runScript.ts` into a
+shared `confirmationUtils.ts` once a second confirmation flow needed the
+exact same behavior — two independent copies risked silently drifting
+apart. `browser_type` deliberately has no "press Enter to submit" option
+— a field that submits on Enter still needs a separate `browser_click` on
+whatever triggers it, so every commit decision goes through the one
+already-reasoned-through heuristic instead of a second, differently-
+shaped guess for text fields.
+
+15 new unit tests (`browserAutomation.test.ts`) mock `playwright-core`
+entirely — there's no real Chrome in the sandbox — covering the
+confirmation gate (keyword-triggered, `may_commit`-triggered, confirm/
+deny/unclear resolution matching `runScript.ts`'s exact behavior) and
+honest-failure paths (unreachable Chrome, stale element ID). What's real-
+machine confirmed, not sandbox-testable: the actual cursor movement,
+click accuracy, and CDP attach against a real running Chrome.
+
+Real-machine testing surfaced one more thing worth remembering: Chrome's
+`--remote-debugging-port` only applies on a genuinely fresh process
+launch. If Chrome was already running (the common case - most people
+leave it open), invoking it again just activates the existing window via
+Chrome's single-instance handling and silently ignores the new flag,
+even though `open_app`'s config correctly includes it. `browserAutomation.ts`
+now distinguishes this from "Chrome isn't running at all" by checking for
+a running `chrome.exe` (same `Get-Process` pattern `systemUsage.ts`
+already uses) whenever the CDP connection fails, and gives the specific,
+actionable fix (close every window completely, including background/tray
+instances, then relaunch) instead of a generic "not reachable" message
+that was technically true but not useful. 2 more unit tests cover both
+diagnosis branches directly (mocking the process check), plus a test
+confirming the diagnosis is only shown when the connection actually
+dropped, not appended to an ordinary action-level failure on an otherwise
+healthy connection.
+
+Known, deliberately deferred: `DEFAULT_MAX_STEPS` (5, `orchestrator.ts`)
+wasn't raised for browser tasks specifically, even though a realistic
+multi-step flow (navigate → type → click → click again) can burn most of
+that budget fast. Revisit if real testing shows it's cutting off
+legitimate tasks partway — not changed speculatively here.
 
 **Gesture-to-action wiring** (the other original Part D item, a
 Milestone 7 CV follow-up) — still not started, still not scoped.
@@ -466,7 +567,7 @@ Ties to the dashboard's "Connected devices" coming-soon tile. Needs real
 device enumeration (Windows Bluetooth/WinRT APIs, likely via a native Node
 addon) — real data or an honest empty state, never placeholder numbers.
 
-## Milestone 13 — Settings panel + persistent dashboard session history — in progress
+## Milestone 13 — Settings panel + persistent dashboard session history — done, confirmed
 
 Right now all configuration is `.env`-only and the dashboard's session log
 resets on every relaunch. A real settings UI and a persisted log (even just
@@ -474,7 +575,7 @@ a local JSON/SQLite file) would remove the last "everything resets" rough
 edge. This is the dashboard's UI log persisting — not Proxy remembering
 anything about the user (that's Milestone 10).
 
-**Session log persistence — built, not yet real-machine tested.** Every
+**Session log persistence — confirmed on the real machine.** Every
 SESSION LOG card entry (`heard`/`routed`/`reply`/`status`/`error`) is now
 mirrored to a flat local JSON file (`~/.proxima/session-log.json`,
 `PROXY_SESSION_LOG_FILE` overridable, capped at 500 entries, oldest
@@ -483,24 +584,50 @@ original timestamps, not "now" — separated from the new session's live
 entries by a plain divider. `main.ts` never formats anything itself; it
 mirrors the already-formatted `{kind, text}` pairs `renderer.js` already
 rendered, so there's exactly one place (`renderer.js`) that decides how
-an event reads. 5 new unit tests (`sessionLog.test.ts`) cover load/
-append/cap logic against a real temp file. Not yet confirmed the actual
-relaunch-and-see-history-restored flow works end to end on the real
-machine — the sandbox can't launch Electron to check that.
+an event reads. 7 unit tests (`sessionLog.test.ts`) cover load/append/
+cap/clear logic against a real temp file. Confirmed via an actual
+relaunch: history restored with real original timestamps, divider in the
+right place. Also added, once confirmed: a small "Clear" button on the
+SESSION LOG card (`clearLogHistory()`) — wipes both the on-screen log and
+the persisted file, behind a native confirm dialog since it's
+irreversible and the whole point of this feature is that history
+survives a relaunch.
 
-**Settings UI — not started.** A real design question sits ahead of
-building this, not just implementation work: does changing a setting in
-the UI take effect live, or only after restarting Proxy? Nearly every
-env var added so far (`PROXY_WORKSPACE_DIR`, `GMAIL_*`,
-`PROXY_MEMORY_FILE`, `PROXY_SCRIPT_TIMEOUT_MS`) is read once at module
-load time throughout this codebase — a live-reload settings UI would
-need rearchitecting config loading everywhere, while a "restart to
-apply" settings UI is honest about that limitation and buildable now.
-Leaning toward the latter for a first version (matches this project's
-"don't build the harder version until the simpler one proves
-insufficient" instinct elsewhere), but not decided — worth confirming
-with the user before starting, same as Part B's confirmation-mechanism
-question was.
+**Settings UI — built, confirmed working end to end.** The open design
+question (did changing a setting take effect live, or only after
+restarting Proxy?) was resolved in favor of restart-to-apply, matching
+how nearly every env var here is already read once at module load time —
+rearchitecting that everywhere for live reload was considered and
+rejected as solving a problem this app doesn't have yet.
+
+Settings are a modal overlay (button in the topbar), covering all 17
+known configuration values across four groups (Voice, Gmail, Assistant,
+Storage, Voice detection). Saved values live in a separate flat JSON file
+(`~/.proxima/settings.json`, `PROXY_SETTINGS_FILE` overridable) layered
+OVER `.env` rather than rewriting `.env` directly — `.env` is a
+hand-edited file with the user's own comments and formatting, and a
+programmatic rewrite that only knows about 17 specific keys risked
+mangling anything else in it. A blank field, saved, removes that key's
+override entirely (falls back to `.env`) rather than persisting an empty
+string — keeps `settings.json`'s content always exactly "what's filled
+in, minus the blanks."
+
+The one real subtlety, worth remembering if this ever seems to
+misbehave: `core/settings.ts` applies the saved file's contents to
+`process.env` as a MODULE-LEVEL side effect the moment it's imported —
+same pattern `dotenv/config` itself uses, and for the same reason. It has
+to be the very next import after `dotenv/config` in both `main.ts` and
+`assistant.ts`, before anything that transitively imports `tts.ts`/
+`gmail.ts`/etc., or those modules would capture their `process.env`
+values before the override ever gets applied and every saved setting
+would silently do nothing. Same shape of easy-to-reintroduce bug as this
+session's `vi.hoisted()` testing lesson — see decisions.md.
+
+Also cleaned up while in this area: the CAMERA card's title no longer
+shows "Milestone 7 — hand tracking" — just "CAMERA." The milestone/
+feature-name tag made sense while that card was new; it doesn't add
+anything now that hand tracking has just been a normal, working part of
+the dashboard for a while.
 
 ## Milestone 14 — Dashboard visual refresh — not started, planning stage
 
@@ -531,8 +658,10 @@ Planned scope:
 - **Output / session log**: shorten to a compact placeholder-style card —
   the full detailed log view is what the future "Memory" nav destination is
   for.
-- **Camera card**: drop the "Milestone 7 — hand tracking" tag, just
-  "CAMERA" — more capabilities are coming to this card later.
+- ~~**Camera card**: drop the "Milestone 7 — hand tracking" tag, just
+  "CAMERA" — more capabilities are coming to this card later.~~ — DONE,
+  pulled forward ahead of the rest of this milestone (bundled into the
+  Milestone 13 settings-panel patch instead of shipped alone).
 - **New placeholder cards** (Neural Network graph, Activity chart): styled
   to match the reference's aesthetic, but kept honest rather than populated
   with realistic-looking fake data (the reference itself shows fabricated
@@ -901,14 +1030,17 @@ easier-to-get-annoying UX problem (what's actually call-worthy, how often
 is too often) that deserves its own real design pass, not an assumption
 baked in alongside the plumbing.
 
-## Personality/tone: FRIDAY-style address ("sir") — not a milestone, just a prompt edit whenever
+## Personality/tone: FRIDAY-style address ("sir") — done
 
-Worth noting separately from the numbered milestones above: this is a
-few lines in `llm.ts`'s existing `PERSONALITY` constant (already touched
-this session for TTS-safety), not a new capability. No architecture, no
-research, no real scoping needed - just hasn't shipped yet because
-nothing's forced a code patch to include it. Folding into whichever
-patch comes next rather than tracking as its own item.
+A few lines in `llm.ts`'s existing `PERSONALITY`/`CREATOR_BIO` constants,
+not a new capability — no milestone needed. `CREATOR_BIO` hardcodes both
+the "sir" form of address and that the person talking to Proxy IS
+Yatharth (the project's own creator), not derived at runtime. Explicitly
+acceptable per the user for a single-user personal project. This section
+previously said "hasn't shipped yet" after the change had already landed
+— decisions.md had the correct, current state; this section just hadn't
+been updated to match. Confirmed live in the real session log too
+(Proxy addressing the user as "sir" unprompted).
 
 ## Open questions (need your input)
 
@@ -926,17 +1058,6 @@ patch comes next rather than tracking as its own item.
   `recall_facts` would need to answer (e.g. "what do you know about my
   <project>"). Only mocked/unit-tested so far, not confirmed against a
   real Ollama call end-to-end.
-- **Milestone 13, session log persistence**: close Proxy, relaunch it,
-  and confirm your previous session's log entries actually reappear
-  above a "— new session —" divider with their real original times, not
-  "now." The sandbox can't launch Electron to check this end-to-end.
-- **Milestone 13, settings UI**: does changing a setting take effect
-  live, or only after restarting Proxy? Leaning toward "restart to
-  apply" as the honest, buildable-now v1 (see `decisions.md`) — but this
-  is your call before it gets built, not a default to just proceed on.
-- **Camera card position**: can you confirm you've actually seen it in the
-  bottom-left on your machine? (See the flagged discrepancy at the top of
-  this file — the code itself already checks out.)
 - **Milestone 10 workspace folder**: `write_file`/`open_path` default to
   `~/ProxyWorkspace` if `PROXY_WORKSPACE_DIR` isn't set. Now confirmed
   working at that default — flagging only in case you'd rather point it

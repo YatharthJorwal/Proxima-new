@@ -16,7 +16,7 @@ const { TEST_LOG_FILE } = vi.hoisted(() => {
   return { TEST_LOG_FILE: file as string };
 });
 
-import { loadLogHistory, appendLogEntry } from "./sessionLog";
+import { loadLogHistory, appendLogEntry, clearLogHistory } from "./sessionLog";
 
 beforeEach(async () => {
   await fs.rm(TEST_LOG_FILE, { force: true });
@@ -70,5 +70,23 @@ describe("appendLogEntry", () => {
     expect(history).toHaveLength(500);
     expect(history.map((e) => e.text)).not.toContain("seeded 0");
     expect(history[history.length - 1].text).toBe("newest entry");
+  });
+});
+
+describe("clearLogHistory", () => {
+  it("empties out previously persisted entries", async () => {
+    await appendLogEntry("heard", "one");
+    await appendLogEntry("reply", "two");
+    expect(await loadLogHistory()).toHaveLength(2);
+
+    await clearLogHistory();
+
+    expect(await loadLogHistory()).toEqual([]);
+  });
+
+  it("is safe to call when no log file exists yet", async () => {
+    await clearLogHistory();
+
+    expect(await loadLogHistory()).toEqual([]);
   });
 });

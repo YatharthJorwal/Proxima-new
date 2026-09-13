@@ -17,6 +17,7 @@
  */
 
 import "dotenv/config";
+import "../core/settings";
 import * as readline from "readline";
 import { ProxyEngine, RouteInfo } from "./engine";
 
@@ -55,7 +56,9 @@ engine.on("routed", (info) => console.log(`Routed via: ${describeRoute(info)}`))
 // Milestone 10 Part B — the reply text right after this already says
 // "say yes/no", so this line is just a heads-up that the CLI is now
 // waiting on that, not new information the reply doesn't already carry.
-engine.on("awaiting-confirmation", (info) => console.log(`(awaiting confirmation: run ${info.path})`));
+engine.on("awaiting-confirmation", (info) =>
+  console.log(`(awaiting confirmation: ${"path" in info ? `run ${info.path}` : `click "${info.description}"`})`)
+);
 engine.on("reply", (text) => console.log(`Proxy: ${text}`));
 engine.on("speaking", () => console.log("Speaking..."));
 engine.on("cancelled", () => console.log("(stopped)"));

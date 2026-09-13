@@ -126,7 +126,7 @@ anything that's just the assistant's own reply restated.
 
 Respond with ONLY a JSON array of short plain strings, one per fact
 worth keeping, each written as a standalone statement (e.g. "Prefers
-metric units," "Working on a budgeting app called Ledger"). If nothing
+metric units," "Working on a personal budgeting app"). If nothing
 from this exchange is worth remembering - which will be most exchanges -
 respond with exactly: []
 

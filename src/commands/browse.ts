@@ -16,6 +16,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { CommandHandler } from "./types";
 import { launch } from "./launch";
+import { LEAD_IN_SOURCE } from "./regexUtils";
 
 interface BrowseConfig {
   browse: Record<string, string>;
@@ -42,7 +43,7 @@ export function getBrowseSites(): string[] {
 // off the other regex handlers make (see commands/index.ts). Fuzzier
 // phrasing ("open youtube and search for X", "look up X on google")
 // still works, just through the LLM tool instead of this fast path.
-const SEARCH_PATTERN = /^(?:please\s+)?search\s+(.+?)\s+for\s+(.+?)[.!?]?$/i;
+const SEARCH_PATTERN = new RegExp(`^${LEAD_IN_SOURCE}search\\s+(.+?)\\s+for\\s+(.+?)[.!?]?$`, "i");
 
 function normalizeSite(site: string): string {
   return site.trim().toLowerCase();

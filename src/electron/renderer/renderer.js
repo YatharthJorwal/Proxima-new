@@ -312,6 +312,21 @@ function timestamp(date) {
   return (date || new Date()).toLocaleTimeString([], { hour12: false });
 }
 
+// Confirmed via a native dialog since this is irreversible - the whole
+// point of Milestone 13's persistence is that history survives a
+// relaunch, so clearing it should be a deliberate act, not a stray
+// click. Clears the DOM immediately rather than waiting on the IPC
+// round-trip - clearLog() is fire-and-forget on the main-process side
+// (same shape as persistLogEntry), and there's nothing for the
+// renderer to wait for.
+const clearLogBtn = document.getElementById("clearLogBtn");
+clearLogBtn.addEventListener("click", () => {
+  if (!confirm("Clear the session log? This can't be undone.")) return;
+  log.innerHTML = "";
+  log.appendChild(logEmpty);
+  window.proxy.clearLog();
+});
+
 // Milestone 13 — opts.timestamp (an ISO string) lets hydrated history
 // entries show their real original time instead of "now"; opts.skipPersist
 // stops a hydrated entry from being written straight back to the log file
@@ -473,7 +488,8 @@ window.proxy.on("tool-result", ({ name, result }) => {
 // event), same as every other row in this panel.
 window.proxy.on("awaiting-confirmation", (info) => {
   resolveActivityRow(currentRow);
-  addActivityRow(`Awaiting confirmation: run ${info.path}`, { action: true });
+  const label = "path" in info ? `run ${info.path}` : `click "${info.description}"`;
+  addActivityRow(`Awaiting confirmation: ${label}`, { action: true });
   flashAction();
 });
 
@@ -675,4 +691,117 @@ inputForm.addEventListener("submit", (event) => {
   if (!text) return;
   window.proxy.submitText(text);
   inputText.value = "";
+});
+
+// ================================================================
+// Settings modal (Milestone 13, second half)
+// ================================================================
+
+// Grouping/labels/input type - metadata with no backend equivalent, so
+// it's hand-maintained here. The actual key NAMES and their current
+// values come from window.proxy.getSettings() at open time, not from
+// this list, so this only needs to stay in sync with core/settings.ts's
+// SETTINGS_KEYS by having an entry for each one - a key missing here
+// just wouldn't be editable, not a crash.
+const SETTINGS_FIELDS = [
+  { group: "Voice", key: "ELEVENLABS_API_KEY", label: "ElevenLabs API key", type: "password" },
+  { group: "Voice", key: "ELEVENLABS_VOICE_ID", label: "ElevenLabs voice ID", type: "text" },
+  { group: "Voice", key: "PIPER_EXE_PATH", label: "Piper executable path (fallback)", type: "text" },
+  { group: "Voice", key: "PIPER_VOICE_PATH", label: "Piper voice path (fallback)", type: "text" },
+  { group: "Gmail", key: "GMAIL_CLIENT_ID", label: "Client ID", type: "text" },
+  { group: "Gmail", key: "GMAIL_CLIENT_SECRET", label: "Client secret", type: "password" },
+  { group: "Gmail", key: "GMAIL_REFRESH_TOKEN", label: "Refresh token", type: "password" },
+  { group: "Assistant", key: "PROXY_HOTKEY", label: "Hotkey", type: "text" },
+  { group: "Assistant", key: "PROXY_ORCHESTRATOR_MAX_STEPS", label: "Max tool steps per request", type: "number" },
+  { group: "Assistant", key: "PROXY_SCRIPT_TIMEOUT_MS", label: "Script timeout (ms)", type: "number" },
+  { group: "Storage", key: "PROXY_WORKSPACE_DIR", label: "Workspace directory", type: "text" },
+  { group: "Storage", key: "PROXY_MEMORY_FILE", label: "Memory file path", type: "text" },
+  { group: "Storage", key: "PROXY_SESSION_LOG_FILE", label: "Session log file path", type: "text" },
+  { group: "Voice detection", key: "PROXY_VAD_MAX_MS", label: "Max recording length (ms)", type: "number" },
+  { group: "Voice detection", key: "PROXY_VAD_MAX_WAIT_MS", label: "Max wait for speech (ms)", type: "number" },
+  { group: "Voice detection", key: "PROXY_VAD_SILENCE_MS", label: "Silence to auto-stop (ms)", type: "number" },
+  { group: "Voice detection", key: "PROXY_VAD_THRESHOLD", label: "Silence threshold", type: "number" },
+];
+
+const settingsBtn = document.getElementById("settingsBtn");
+const settingsOverlay = document.getElementById("settingsOverlay");
+const settingsBody = document.getElementById("settingsBody");
+const settingsCloseBtn = document.getElementById("settingsCloseBtn");
+const settingsCancelBtn = document.getElementById("settingsCancelBtn");
+const settingsSaveBtn = document.getElementById("settingsSaveBtn");
+const settingsStatus = document.getElementById("settingsStatus");
+const showSecretsToggle = document.getElementById("showSecretsToggle");
+
+// Built once; re-populated (not rebuilt) each time the modal opens, so
+// the input elements referenced in settingsInputs stay valid across
+// opens rather than needing to be re-queried.
+const settingsInputs = {};
+let lastGroup = null;
+for (const field of SETTINGS_FIELDS) {
+  if (field.group !== lastGroup) {
+    const heading = document.createElement("div");
+    heading.className = "settings-group-title";
+    heading.textContent = field.group;
+    settingsBody.appendChild(heading);
+    lastGroup = field.group;
+  }
+  const row = document.createElement("div");
+  row.className = "settings-field";
+  const label = document.createElement("label");
+  label.textContent = field.label;
+  label.htmlFor = `setting-${field.key}`;
+  const input = document.createElement("input");
+  input.type = field.type;
+  input.id = `setting-${field.key}`;
+  row.appendChild(label);
+  row.appendChild(input);
+  settingsBody.appendChild(row);
+  settingsInputs[field.key] = input;
+}
+
+function openSettingsModal() {
+  settingsStatus.textContent = "";
+  settingsOverlay.classList.remove("hidden");
+  window.proxy.getSettings().then((values) => {
+    for (const field of SETTINGS_FIELDS) {
+      settingsInputs[field.key].value = (values && values[field.key]) || "";
+    }
+  });
+}
+
+function closeSettingsModal() {
+  settingsOverlay.classList.add("hidden");
+}
+
+settingsBtn.addEventListener("click", openSettingsModal);
+settingsCloseBtn.addEventListener("click", closeSettingsModal);
+settingsCancelBtn.addEventListener("click", closeSettingsModal);
+
+// Click on the dimmed backdrop closes it too, same as pressing Escape
+// below - only when the click actually lands on the overlay itself, not
+// something inside the modal bubbling up.
+settingsOverlay.addEventListener("click", (event) => {
+  if (event.target === settingsOverlay) closeSettingsModal();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !settingsOverlay.classList.contains("hidden")) closeSettingsModal();
+});
+
+showSecretsToggle.addEventListener("change", () => {
+  const revealedType = showSecretsToggle.checked ? "text" : "password";
+  for (const field of SETTINGS_FIELDS) {
+    if (field.type === "password") settingsInputs[field.key].type = revealedType;
+  }
+});
+
+settingsSaveBtn.addEventListener("click", () => {
+  const values = {};
+  for (const field of SETTINGS_FIELDS) {
+    values[field.key] = settingsInputs[field.key].value;
+  }
+  settingsStatus.textContent = "Saving…";
+  window.proxy.saveSettings(values).then((result) => {
+    settingsStatus.textContent = result && result.ok ? "Saved — restart Proxy to apply." : "Save failed — see the console.";
+  });
 });

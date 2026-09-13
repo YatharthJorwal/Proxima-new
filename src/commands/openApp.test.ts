@@ -33,6 +33,34 @@ describe("tryHandleOpenApp", () => {
     expect(mockLaunch).toHaveBeenCalledWith("notepad.exe");
   });
 
+  it("passes launch args through for an app configured as {path, args} (chrome's debug-port flag)", async () => {
+    // chrome is real config/commands.json content, not a fixture -
+    // confirms the {path, args} shape (added for browserAutomation.ts's
+    // CDP attach) actually reaches launch() with both parts, not just
+    // the path.
+    const result = await tryHandleOpenApp("open chrome");
+    expect(result).toBe("Opening chrome.");
+    expect(mockLaunch).toHaveBeenCalledWith(
+      "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+      expect.arrayContaining(["--remote-debugging-port=9222"])
+    );
+  });
+
+  it("tolerates real conversational lead-ins instead of missing the fast path (real-machine regression)", async () => {
+    // "Okay, so open Chrome" was the exact phrase that missed the old
+    // please-only pattern on the real machine and fell through to the
+    // LLM, which then picked the wrong tool entirely (browse, since
+    // chrome isn't a browsable site) - meaning Chrome never launched with
+    // the debug flag browserAutomation.ts needs. This is the deterministic
+    // fix: catch it here so it never reaches the LLM's judgment at all.
+    for (const phrase of ["okay so open chrome", "alright, open chrome", "can you open chrome", "well open chrome"]) {
+      mockLaunch.mockClear();
+      const result = await tryHandleOpenApp(phrase);
+      expect(result).toBe("Opening chrome.");
+      expect(mockLaunch).toHaveBeenCalled();
+    }
+  });
+
   it("returns null for an unrecognized single app name, instead of a canned wrong answer", async () => {
     // Regression case from real-machine testing: "open github" used to
     // match this regex and answer "I don't have github set up..." even

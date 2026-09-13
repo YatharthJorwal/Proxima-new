@@ -54,10 +54,11 @@
  */
 
 import "dotenv/config";
+import { getEffectiveSettings, saveSettings, SettingsMap, SETTINGS_KEYS } from "../core/settings";
 import { app, BrowserWindow, globalShortcut, ipcMain, session } from "electron";
 import * as path from "path";
 import { ProxyEngine, RouteInfo } from "../core/engine";
-import { appendLogEntry, loadLogHistory } from "../core/sessionLog";
+import { appendLogEntry, loadLogHistory, clearLogHistory } from "../core/sessionLog";
 
 const HOTKEY = process.env.PROXY_HOTKEY || "F9";
 const MAX_TYPED_INPUT_LENGTH = 1000;
@@ -127,6 +128,42 @@ function wireRendererCommands() {
   ipcMain.on("proxy:persist-log-entry", (_event, entry) => {
     if (!entry || typeof entry.kind !== "string" || typeof entry.text !== "string") return;
     void appendLogEntry(entry.kind, entry.text);
+  });
+
+  // Backs the dashboard's "Clear" button (renderer.js) - the renderer
+  // already clears its own DOM the moment the user confirms, so this
+  // only needs to wipe the persisted copy; there's nothing to send back.
+  ipcMain.on("proxy:clear-log", () => {
+    void clearLogHistory();
+  });
+
+  // Settings modal (Milestone 13, second half). First request-response
+  // pair in this file - every verb above is fire-and-forget, but the
+  // modal genuinely needs the current effective values back to populate
+  // its fields, so this uses ipcMain.handle/ipcRenderer.invoke instead.
+  ipcMain.handle("proxy:get-settings", () => {
+    return getEffectiveSettings();
+  });
+
+  // Same "don't trust our own renderer blindly" validation as every
+  // other handler here - only known keys with string values ever reach
+  // saveSettings(); anything else in the payload is silently dropped
+  // rather than trusted through to a file write.
+  ipcMain.handle("proxy:save-settings", async (_event, values) => {
+    if (!values || typeof values !== "object") return { ok: false };
+    const filtered: SettingsMap = {};
+    for (const key of Object.keys(values)) {
+      if (SETTINGS_KEYS.includes(key as (typeof SETTINGS_KEYS)[number]) && typeof values[key] === "string") {
+        filtered[key as keyof SettingsMap] = values[key];
+      }
+    }
+    try {
+      await saveSettings(filtered);
+      return { ok: true };
+    } catch (err) {
+      console.error("Failed to save settings:", err);
+      return { ok: false };
+    }
   });
 }
 

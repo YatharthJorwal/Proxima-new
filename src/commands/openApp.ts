@@ -17,9 +17,18 @@ import * as fs from "fs";
 import * as path from "path";
 import { CommandHandler } from "./types";
 import { launch } from "./launch";
+import { LEAD_IN_SOURCE } from "./regexUtils";
+
+interface AppTarget {
+  path: string;
+  args?: string[];
+}
 
 interface CommandsConfig {
-  openApp: Record<string, string>;
+  // Every existing entry is a plain string, unaffected by this change.
+  // {path, args} is additive - its one current use is chrome's entry,
+  // needing --remote-debugging-port for commands/browserAutomation.ts.
+  openApp: Record<string, string | AppTarget>;
 }
 
 // NOTE: this assumes you're running the project directly from src/ (e.g.
@@ -41,7 +50,7 @@ const config = loadConfig();
 
 // Matches "open X", "launch X", "start X", with an optional leading
 // "please" and optional trailing punctuation from STT.
-const OPEN_PATTERN = /^(?:please\s+)?(?:open|launch|start)\s+(.+?)[.!?]?$/i;
+const OPEN_PATTERN = new RegExp(`^${LEAD_IN_SOURCE}(?:open|launch|start)\\s+(.+?)[.!?]?$`, "i");
 
 function normalize(name: string): string {
   return name.trim().toLowerCase();
@@ -67,7 +76,11 @@ export async function executeOpenApp(appNameRaw: string): Promise<string> {
   }
 
   try {
-    await launch(target);
+    if (typeof target === "string") {
+      await launch(target);
+    } else {
+      await launch(target.path, target.args ?? []);
+    }
     return `Opening ${requested}.`;
   } catch (err) {
     console.error("Failed to open app:", err);

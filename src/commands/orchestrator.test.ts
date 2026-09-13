@@ -199,6 +199,29 @@ describe("Orchestrator", () => {
     expect(smartMessages.find((m) => m.role === "tool")?.content).toBe("42GB free.");
   });
 
+  it("falls back to an honest reply instead of speaking nothing when the fast tier's content is empty", async () => {
+    mockChat.mockResolvedValueOnce(plainReply(""));
+
+    const result = await new Orchestrator().run("hello");
+
+    expect(result.reply).toBe("I don't have a good answer for that one.");
+  });
+
+  it("falls back to an honest reply instead of speaking nothing when the smart tier's content is empty", async () => {
+    // Reproduces the real-machine bug: recall_facts escalates to the
+    // smart tier, which puts its whole answer into `thinking` and
+    // leaves `content` (and so `reply`) blank.
+    mockTools.recall_facts = { resultInformsNextStep: true };
+    mockChat
+      .mockResolvedValueOnce(toolCallReply("recall_facts", { query: "teachers" }))
+      .mockResolvedValueOnce(plainReply(""));
+    mockDispatchTool.mockResolvedValueOnce("No matching facts found.");
+
+    const result = await new Orchestrator().run("what do you know about teachers");
+
+    expect(result.reply).toBe("I don't have a good answer for that one.");
+  });
+
   it("emits deciding with the correct tier, letting a listener tell fast and smart apart", async () => {
     mockChat
       .mockResolvedValueOnce(toolCallReply("defer_to_planner"))

@@ -82,6 +82,16 @@ core/                  (project root — user renamed this from "files/" after M
       memory.test.ts     # real-temp-file tests (same pattern as fileTools.test.ts), npm test.
                          # See decisions.md for a vi.hoisted/vi.mock ordering pitfall this file
                          # ran into and fixed — worth reading before writing a similar test.
+      settings.ts        # Milestone 13, second slice — Settings modal's persistence layer.
+                         # Saved values (~/.proxima/settings.json) layered OVER .env, applied to
+                         # process.env as a MODULE-LEVEL side effect of being imported at all
+                         # (mirrors dotenv/config's own pattern) — has to be the second import in
+                         # main.ts/assistant.ts, right after dotenv/config, before anything that
+                         # transitively reads its own env vars. See this file's own docblock and
+                         # decisions.md — same "ordering matters and fails silently if wrong" shape
+                         # as this session's vi.hoisted() testing lesson, just in production code.
+      settings.test.ts   # tests the same import-time side effect for real via vi.hoisted(),
+                         # npm test.
     commands/           # hardcoded + LLM-routed PC-automation commands
       index.ts          # deterministic regex router (fast path); returns {handler, reply}
       orchestrator.ts    # Milestone 9 build order step 4 — the actual multi-step loop (two-tier
@@ -139,6 +149,19 @@ core/                  (project root — user renamed this from "files/" after M
       runScript.test.ts  # real end-to-end tests (real node/python, real temp workspace, no
                          # mocking) — confirm/deny/unrelated-utterance/timeout-kill paths,
                          # npm test.
+      confirmationUtils.ts # shared classifyYesNo() — extracted from runScript.ts once
+                         # browserAutomation.ts needed the exact same "confirm on a following
+                         # turn" phrase matching. One shared copy, not two that could drift.
+      confirmationUtils.test.ts # direct classifier coverage, npm test.
+      browserAutomation.ts # Milestone 10 Part E — browser_navigate/read_page/click/type.
+                         # CDP-attaches (playwright-core) to the user's real Chrome rather than
+                         # launching a competing instance — see this file's own docblock for the
+                         # full architecture, the labeled-element model, and how it reuses
+                         # runScript.ts's confirmation pattern for commit-shaped clicks.
+                         # See decisions.md for the three real decisions behind its scope.
+      browserAutomation.test.ts # mocks playwright-core entirely (no real Chrome in the
+                         # sandbox) — covers the confirmation gate and honest-failure paths;
+                         # real cursor movement/click accuracy is real-machine-confirmed only.
       volume.ts         # volume up/down/mute + executeVolume()
       window.ts         # maximize/minimize/restore/snap left/right + executeWindow()
     config/

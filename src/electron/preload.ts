@@ -6,13 +6,15 @@
  * here via contextBridge.
  *
  * Deliberately narrow: the renderer can listen to proxy:* events (via
- * `on`), submit typed text (via `submitText`), and mirror a log line it
+ * `on`), submit typed text (via `submitText`), mirror a log line it
  * already rendered back for persistence (via `persistLogEntry`, Milestone
- * 13) — that's it. No generic "invoke any channel" passthrough, no
- * filesystem/process access. Each verb goes out over ipcRenderer.send to
- * a single fixed channel; main.ts is what actually validates and acts on
- * it, so preload's job here is just "don't expose more than these three
- * verbs."
+ * 13), clear the persisted log (via `clearLog`), and read/write the
+ * Settings modal's values (via `getSettings`/`saveSettings`, Milestone
+ * 13's second half) — that's it. No generic "invoke any channel"
+ * passthrough, no filesystem/process access. Each verb goes out over
+ * ipcRenderer.send or ipcRenderer.invoke to a single fixed channel;
+ * main.ts is what actually validates and acts on it, so preload's job
+ * here is just "don't expose more than these six verbs."
  */
 
 import { contextBridge, ipcRenderer, IpcRendererEvent } from "electron";
@@ -90,4 +92,15 @@ contextBridge.exposeInMainWorld("proxy", {
     if (typeof kind !== "string" || typeof text !== "string") return;
     ipcRenderer.send("proxy:persist-log-entry", { kind, text });
   },
+  // Backs the dashboard's "Clear" button - fire-and-forget, same shape
+  // as persistLogEntry above. No payload needed: it's a single fixed
+  // action, not something with a target to validate.
+  clearLog: () => {
+    ipcRenderer.send("proxy:clear-log");
+  },
+  // Settings modal - the first two request-response verbs here (every
+  // one above is fire-and-forget). ipcRenderer.invoke already returns a
+  // Promise, so these just pass it straight through.
+  getSettings: () => ipcRenderer.invoke("proxy:get-settings"),
+  saveSettings: (values: Record<string, string>) => ipcRenderer.invoke("proxy:save-settings", values),
 });

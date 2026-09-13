@@ -15,6 +15,7 @@
     <div class="topbar-right">
       <span class="hotkey" id="hotkeyLabel">binding hotkey…</span>
       <span class="clock" id="clock">--:--:--</span>
+      <button id="settingsBtn" class="settings-btn" title="Settings">⚙ Settings</button>
     </div>
   </header>
 
@@ -38,7 +39,7 @@
       </div>
 
       <div class="card camera-card">
-        <div class="card-title">CAMERA <span class="card-title-tag">Milestone 7 — hand tracking</span></div>
+        <div class="card-title">CAMERA</div>
         <div class="camera-frame">
           <video id="cameraVideo" autoplay muted playsinline></video>
           <canvas id="cameraOverlay"></canvas>
@@ -84,7 +85,10 @@
       </div>
 
       <div class="card card-grow">
-        <div class="card-title">SESSION LOG</div>
+        <div class="card-title-row">
+          <div class="card-title">SESSION LOG</div>
+          <button id="clearLogBtn" class="clear-log-btn" title="Clear session log">Clear</button>
+        </div>
         <div class="log" id="log" aria-live="polite">
           <p class="log-empty" id="logEmpty">Every step will show up here as it happens.</p>
         </div>
@@ -110,6 +114,37 @@
     </section>
 
   </main>
+
+  <!-- Milestone 13, second half. Hidden by default; renderer.js toggles
+       the "hidden" class and fills #settingsBody from its own
+       SETTINGS_FIELDS list (grouping/labels/input type - metadata that
+       has no backend equivalent, unlike the key names themselves, which
+       come from window.proxy.getSettings() rather than being
+       hand-duplicated here). -->
+  <div class="modal-overlay hidden" id="settingsOverlay">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <div class="modal-header">
+        <div class="modal-title" id="settingsTitle">SETTINGS</div>
+        <button class="modal-close" id="settingsCloseBtn" aria-label="Close">✕</button>
+      </div>
+      <p class="modal-note">
+        A value set here overrides your .env file. Leave a field blank and save to fall back to .env instead.
+        Changes take effect after restarting Proxy, not immediately.
+      </p>
+      <div class="modal-body" id="settingsBody"></div>
+      <div class="modal-footer">
+        <label class="show-secrets-label">
+          <input type="checkbox" id="showSecretsToggle" />
+          Show secret values
+        </label>
+        <div class="modal-footer-right">
+          <span class="modal-status" id="settingsStatus"></span>
+          <button class="modal-btn modal-btn-secondary" id="settingsCancelBtn">Cancel</button>
+          <button class="modal-btn modal-btn-primary" id="settingsSaveBtn">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script type="module" src="renderer.js"></script>
 </body>

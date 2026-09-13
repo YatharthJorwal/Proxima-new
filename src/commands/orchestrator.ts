@@ -49,6 +49,21 @@ import { TOOLS, getToolSchemas, dispatchTool } from "./tools";
 
 const DEFAULT_MAX_STEPS = 5;
 
+// Local reasoning models occasionally put their entire answer into the
+// `thinking` trace (smart tier, think: true) and leave `message.content`
+// blank - llm.ts's chat() then returns reply: "" with no toolCall, which
+// isn't "the model chose to say nothing," it's a content-empty response
+// that would otherwise make Proxy speak an empty string. Confirmed on
+// the real machine: two `recall_facts` interactions in the same session
+// produced exactly this - blank replies logged and, presumably, nothing
+// spoken. Same honesty principle as the hitStepCap fallback below (never
+// silently say nothing) applied to the other place a reply can go empty.
+const EMPTY_REPLY_FALLBACK = "I don't have a good answer for that one.";
+
+function sanitizeReply(reply: string | null): string {
+  return reply && reply.length > 0 ? reply : EMPTY_REPLY_FALLBACK;
+}
+
 // Exposed only to the fast tier (never added to the smart-tier tool
 // list) — its whole job is "I'm not confident planning this in one
 // shot," so there's nothing for the smart-tier loop to gain by seeing
@@ -143,7 +158,7 @@ export class Orchestrator extends EventEmitter {
     if (!fastResult.toolCall) {
       // Plain conversation — done, one call total.
       this.emit("responding");
-      return { reply: fastResult.reply ?? "", toolsUsed, fastTierOnly: true, hitStepCap: false, cancelled: false };
+      return { reply: sanitizeReply(fastResult.reply), toolsUsed, fastTierOnly: true, hitStepCap: false, cancelled: false };
     }
 
     if (fastResult.toolCall.name === "defer_to_planner") {
@@ -214,7 +229,7 @@ export class Orchestrator extends EventEmitter {
 
       if (!result.toolCall) {
         this.emit("responding");
-        return { reply: result.reply ?? "", toolsUsed, fastTierOnly: false, hitStepCap: false, cancelled: false };
+        return { reply: sanitizeReply(result.reply), toolsUsed, fastTierOnly: false, hitStepCap: false, cancelled: false };
       }
 
       const { name, arguments: args } = result.toolCall;

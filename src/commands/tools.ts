@@ -24,6 +24,12 @@ import { executeGetSystemUsage } from "./systemUsage";
 import { executeGetEmails } from "./gmail";
 import { executeRecallFacts } from "./memory";
 import { executeRunScript } from "./runScript";
+import {
+  executeBrowserNavigate,
+  executeBrowserClick,
+  executeBrowserType,
+  executeBrowserReadPage,
+} from "./browserAutomation";
 
 export interface ProxyTool {
   /** The LLM-facing schema — name, description, parameters. Sent to Ollama as-is. */
@@ -144,7 +150,7 @@ export const TOOLS: Record<string, ProxyTool> = {
       function: {
         name: "browse",
         description:
-          "Open a website, optionally with a search query - e.g. 'search youtube for lo-fi beats' or just 'open google'. Builds the right URL directly (no browser automation), same fast path as a real search bar.",
+          "Open a website, optionally with a search query - e.g. 'search youtube for lo-fi beats' or just 'open google'. Builds the right URL directly, no clicking or typing on the page itself. Never use this for 'chrome', 'edge', 'firefox', or 'the browser' - those mean launching the browser application itself, which is open_app's job, not this tool's; this tool has no way to do that and picking a fallback site would be a wrong guess, not a real answer. Also never use this as a substitute when 'click X' or 'click the Y link' fails or the browser tools aren't working - searching for the same term on Google is not the same thing as clicking it, and describing that substitution as if it fulfilled the request would be exactly the kind of claim you're told not to make. Use this when opening/searching an actual website is the whole task; if the task needs clicking something or filling in a field after that, use browser_navigate instead.",
         parameters: {
           type: "object",
           properties: {
@@ -285,7 +291,7 @@ export const TOOLS: Record<string, ProxyTool> = {
       function: {
         name: "recall_facts",
         description:
-          "Check what you already know about the user or their ongoing projects from past interactions - e.g. 'what's my dog's name', 'what do you know about my Ledger project'. query is an optional keyword to narrow the search (e.g. 'dog', 'Ledger'); omit it to get everything currently remembered.",
+          "Check what you already know about the user or their ongoing projects from past interactions - e.g. 'what's my dog's name', 'what do you know about my current project'. query is an optional keyword to narrow the search (e.g. 'dog', 'project'); omit it to get everything currently remembered. This is READ-ONLY - there is no corresponding tool to add, correct, or remove a fact, so don't call this in response to a 'remember X' or 'forget X' request; there's nothing this tool can do about either.",
         parameters: {
           type: "object",
           properties: {
@@ -330,6 +336,114 @@ export const TOOLS: Record<string, ProxyTool> = {
     },
     requiresConfirmation: true,
     execute: async (args) => executeRunScript({ path: args.path ? String(args.path) : undefined }),
+  },
+
+  // Browser automation — the "stretch goal" browse.ts's own docblock
+  // flagged, scoped through a real conversation (see
+  // browserAutomation.ts's docblock for the full design). Use browse
+  // above for the common "open/search and nothing more" case; reach for
+  // these four only when the task needs to click, type, or read what's
+  // actually on the page. All four are resultInformsNextStep - every one
+  // returns a labeled element list that's context for the NEXT decision,
+  // never something to speak verbatim (same "don't dump raw tool output"
+  // lesson already logged for get_system_usage).
+  browser_navigate: {
+    schema: {
+      type: "function",
+      function: {
+        name: "browser_navigate",
+        description:
+          "Open a URL in Proxy's browser tab, for a task that will need clicking or typing afterward - e.g. before adding something to a cart, playing a specific video, or filling in a form. Returns a numbered list of the page's clickable/typeable elements for browser_click/browser_type to reference. For just opening or searching a site with nothing further to do, use browse instead - it's faster and doesn't need Chrome's remote debugging to be on.",
+        parameters: {
+          type: "object",
+          properties: {
+            url: {
+              type: "string",
+              description: "The URL to open, e.g. 'https://open.spotify.com' or 'open.spotify.com'.",
+            },
+          },
+          required: ["url"],
+        },
+      },
+    },
+    resultInformsNextStep: true,
+    execute: async (args) => executeBrowserNavigate({ url: args.url ? String(args.url) : undefined }),
+  },
+
+  browser_read_page: {
+    schema: {
+      type: "function",
+      function: {
+        name: "browser_read_page",
+        description:
+          "Get a fresh numbered list of the current page's clickable/typeable elements, without navigating or clicking anything. Call this again whenever asked something like 'can you see the page now' or 'what does it look like' - always check for real rather than answering from an earlier result or a guess, since the page may have changed (or Chrome may not even be attached yet).",
+        parameters: { type: "object", properties: {} },
+      },
+    },
+    resultInformsNextStep: true,
+    execute: async () => executeBrowserReadPage(),
+  },
+
+  browser_click: {
+    schema: {
+      type: "function",
+      function: {
+        name: "browser_click",
+        description:
+          'Click an element from the most recent numbered element list (browser_navigate/browser_read_page/browser_click/browser_type all return one). This performs a real, visible click - the mouse actually moves and clicks on the user\'s screen, with a brief highlight ring, so if asked whether they\'ll be able to see it happen, the honest answer is yes. If asked to click something (e.g. "click the times of india link") without a specific element number given, call browser_read_page first to see what\'s actually on the current page and find the matching element there - don\'t ask the user to repeat themselves or guess by searching elsewhere without checking first. Set may_commit to true if this click submits, buys, sends, deletes, subscribes, or otherwise commits to something meaningful - when in doubt, set it true. A commit-shaped click (whether from this flag or the element\'s own label, e.g. "Buy Now") asks for a yes/no confirmation first instead of clicking immediately, resolved on the user\'s next reply.',
+        parameters: {
+          type: "object",
+          properties: {
+            element_id: {
+              type: "string",
+              description: "The bracketed number from the element list, e.g. '3' for '[3] button \"Play\"'.",
+            },
+            may_commit: {
+              type: "boolean",
+              description: "True if clicking this commits to something (submit, buy, send, delete, subscribe).",
+            },
+          },
+          required: ["element_id"],
+        },
+      },
+    },
+    resultInformsNextStep: true,
+    execute: async (args) =>
+      executeBrowserClick({
+        element_id: args.element_id ? String(args.element_id) : undefined,
+        may_commit: args.may_commit === true,
+      }),
+  },
+
+  browser_type: {
+    schema: {
+      type: "function",
+      function: {
+        name: "browser_type",
+        description:
+          "Type text into a field from the most recent numbered element list. Only enters text - never presses Enter or submits. If typing here needs to be followed by a search/submit button, use browser_click on that button as a separate step afterward.",
+        parameters: {
+          type: "object",
+          properties: {
+            element_id: {
+              type: "string",
+              description: "The bracketed number from the element list, e.g. '2' for '[2] input(text) \"Search\"'.",
+            },
+            text: {
+              type: "string",
+              description: "The text to type into that field.",
+            },
+          },
+          required: ["element_id", "text"],
+        },
+      },
+    },
+    resultInformsNextStep: true,
+    execute: async (args) =>
+      executeBrowserType({
+        element_id: args.element_id ? String(args.element_id) : undefined,
+        text: args.text ? String(args.text) : undefined,
+      }),
   },
 };
 

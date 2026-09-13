@@ -62,6 +62,7 @@ import { execFile, ExecFileException } from "child_process";
 import * as path from "path";
 import * as fs from "fs/promises";
 import { resolveInWorkspace, getWorkspaceRoot } from "./fileTools";
+import { classifyYesNo } from "./confirmationUtils";
 
 const RUNNABLE_EXTENSIONS: Record<string, string> = {
   ".js": "node",
@@ -123,27 +124,6 @@ export async function executeRunScript(args: { path?: string }): Promise<string>
 }
 
 /**
- * Plain keyword matching, not an LLM call - yes/no classification for a
- * handful of common phrasings is exactly the kind of deterministic task
- * that doesn't need one, and keeping this legible/auditable matters more
- * here than anywhere else in the codebase: this is the one place a
- * misclassification could mean running code the user didn't actually
- * confirm.
- */
-function classify(text: string): "confirm" | "deny" | "unclear" {
-  const t = text.trim().toLowerCase();
-  const confirmPhrases = ["yes", "yeah", "yep", "confirm", "run it", "do it", "go ahead", "sure"];
-  const denyPhrases = ["no", "nope", "cancel", "don't", "do not", "stop", "nevermind", "never mind"];
-
-  const matches = (phrases: string[]) =>
-    phrases.some((p) => t === p || t.startsWith(p + " ") || t.endsWith(" " + p));
-
-  if (matches(confirmPhrases)) return "confirm";
-  if (matches(denyPhrases)) return "deny";
-  return "unclear";
-}
-
-/**
  * Checked at the very top of engine.ts's process(), before the regex
  * router or the orchestrator ever see the new utterance. Returns
  * {handled: false} immediately if nothing is pending - the normal case
@@ -156,7 +136,7 @@ export async function tryResolvePendingConfirmation(
 ): Promise<{ handled: boolean; reply?: string; confirmed?: boolean }> {
   if (!pending) return { handled: false };
 
-  const decision = classify(utterance);
+  const decision = classifyYesNo(utterance);
   if (decision === "unclear") {
     pending = null; // dropped, not held open - see this file's docblock
     return { handled: false };

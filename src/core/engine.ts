@@ -36,12 +36,13 @@ import { EventEmitter } from "events";
 import { initSTT, transcribe } from "./stt";
 import { speak } from "./tts";
 import { recordUntilSilence } from "./audioUtils";
-import { ModelTier } from "./llm";
+import { chat, ModelTier } from "./llm";
 import { normalizeForSpeech } from "./textForSpeech";
 import { tryHandleCommand, RegexCommandResult } from "../commands";
 import { Orchestrator } from "../commands/orchestrator";
 import { extractAndStoreMemories } from "./memory";
 import { tryResolvePendingConfirmation, getPendingConfirmation } from "../commands/runScript";
+import { tryResolvePendingBrowserConfirmation, getPendingBrowserConfirmation } from "../commands/browserAutomation";
 
 // Milestone 8 (VAD) tuning knobs — optional .env overrides, same pattern
 // as PROXY_HOTKEY in electron/main.ts. Read here rather than in
@@ -121,7 +122,7 @@ export interface EngineEvents {
   // turn. The *next* turn's outcome (confirmed and ran, or cancelled)
   // arrives via "routed" with source "confirmation", same as any other
   // turn — no separate event needed for that half.
-  "awaiting-confirmation": (info: { path: string }) => void;
+  "awaiting-confirmation": (info: { path: string } | { description: string }) => void;
 }
 
 export declare interface ProxyEngine {
@@ -152,7 +153,39 @@ export class ProxyEngine extends EventEmitter {
   async init(): Promise<void> {
     if (this.initialized) return;
     await initSTT();
+    await this.warmUpFastTier();
     this.initialized = true;
+  }
+
+  /**
+   * Milestone 13 cold-start fix — confirmed on the real machine as a
+   * 43-second gap between "heard" and "routed" on the very first
+   * utterance after launch, on a call that resolved at the fast tier
+   * alone (no smart-tier escalation, which already pays a documented
+   * one-time load cost of its own — see decisions.md). Ollama doesn't
+   * load a model into VRAM until its first real call, and until now
+   * that first call was whatever the user happened to say first.
+   *
+   * Paying that cost here instead is safe specifically because of two
+   * things already true elsewhere in this codebase: electron/main.ts
+   * doesn't register the global hotkey until init() resolves, so
+   * there's no window where a real request could land before this
+   * finishes; and the dashboard already shows "Starting…" (renderer.js)
+   * before the `ready` event, which stays honest — it's just a longer
+   * "Starting…" the first time, not a new or fake state.
+   *
+   * Failure here is caught and logged, not thrown — same non-fatal
+   * shape as tts.ts's ElevenLabs-to-Piper fallback. If Ollama genuinely
+   * isn't reachable, the very first real request will surface that
+   * clearly on its own; a failed warm-up ping doesn't need to block
+   * app startup to make that true.
+   */
+  private async warmUpFastTier(): Promise<void> {
+    try {
+      await chat({ tier: "fast", messages: [{ role: "user", content: "hi" }] });
+    } catch (err) {
+      console.warn("[engine] Fast-tier warm-up call failed (non-fatal, first real request will retry):", err);
+    }
   }
 
   /**
@@ -243,7 +276,15 @@ export class ProxyEngine extends EventEmitter {
 
   /** Shared tail: route -> reply -> speak. Used by both entry points above. */
   private async process(text: string): Promise<void> {
-    const confirmation = await tryResolvePendingConfirmation(text);
+    // Checked in this order because they're both the same "single
+    // pending slot, resolved by a separate following turn" pattern (see
+    // runScript.ts's docblock) - at most one is realistically ever
+    // actually pending at once, so this is a plain fallthrough chain,
+    // not a real priority decision between the two.
+    let confirmation = await tryResolvePendingConfirmation(text);
+    if (!confirmation.handled) {
+      confirmation = await tryResolvePendingBrowserConfirmation(text);
+    }
 
     let reply: string;
     if (confirmation.handled) {
@@ -269,13 +310,14 @@ export class ProxyEngine extends EventEmitter {
         );
         reply = result.reply;
 
-        // Milestone 10 Part B — this run's reply is the confirmation
-        // *request* text (run_script's execute() never runs anything
-        // itself); surface that a script is now awaiting a yes/no on the
-        // next turn. Checked via getPendingConfirmation() rather than
-        // result.toolsUsed alone, since a pending confirmation is the
-        // actual state that matters here, not just which tool ran.
-        const nowPending = getPendingConfirmation();
+        // Milestone 10 Part B / browser automation — this run's reply is
+        // the confirmation *request* text (neither tool's execute() runs
+        // anything itself in that case); surface that something is now
+        // awaiting a yes/no on the next turn. Checked via the two
+        // getPending*() functions rather than result.toolsUsed alone,
+        // since a pending confirmation is the actual state that matters
+        // here, not just which tool ran.
+        const nowPending = getPendingConfirmation() ?? getPendingBrowserConfirmation();
         if (nowPending) {
           this.emit("awaiting-confirmation", nowPending);
         }

@@ -27,6 +27,11 @@ describe("tryHandleBrowse", () => {
     );
   });
 
+  it("tolerates conversational lead-ins, same fix as openApp.ts's OPEN_PATTERN", async () => {
+    const result = await tryHandleBrowse("okay so search youtube for lofi beats");
+    expect(result).toBe('Searching youtube for "lofi beats".');
+  });
+
   it("returns null for an unrecognized site instead of a canned wrong answer", async () => {
     expect(await tryHandleBrowse("search bing for cats")).toBeNull();
     expect(mockLaunch).not.toHaveBeenCalled();

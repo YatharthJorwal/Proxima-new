@@ -63,28 +63,45 @@ webcam hand-tracking slice. Full stack table, diagrams, and directory
 layout: `docs/architecture.md`.
 
 ## Current status (short version)
+**Read `handoff.md` first if it exists — it's the latest session's handoff
+note and takes priority over anything below if they conflict.** This
+section is the durable summary; `handoff.md` is the "what just happened"
+layer on top of it, meant to get folded back into this file and
+`docs/project-status.md` once it's been read, not to live forever.
+
 Milestones 1–9 (audio pipeline, STT, hardcoded commands, TTS, LLM intent
 routing, dashboard, first CV slice, VAD, task orchestration) are built and
 confirmed working on the user's real machine. Milestone 10 (agentic
-capabilities) is in progress: Parts A and B (file tools; code execution/
-run_script, including its confirmation mechanism) confirmed working on
-the real machine; Part C (external data) has a Gmail query tool built,
-pending a real .env/setup fix (real-machine test returned "not
-connected"); Part D (memory) has an automatic-capture slice built,
-pending real-machine confirmation, and gesture-to-action wiring (the
-other Part D item) still not started/scoped at all — this is what's
-actually left before Milestone 10 as a whole is done. Milestone 13
-(settings + persistent session log) is in progress: session log
-persistence built, not yet real-machine tested; the settings UI half has
-a real open design question (live-apply vs. restart-to-apply) awaiting
-the user's call before it's started. Milestone 19 Part A
-(system usage query tool) is also confirmed working. Known open issue,
-deferred by request: the fast tier appears to never escalate to the
-smart tier in practice (see project-status.md's
-Known Limitations) — informed two of Part D's design choices. See
-`docs/project-status.md` for the full breakdown.
+capabilities) is in progress: Parts A and B (file tools; run_script)
+confirmed working; Part C (Gmail) still has the pending .env/setup issue,
+unresolved; Part D (memory) confirmed working, with two real bugs found
+via real-machine testing and fixed (an empty-reply fallback, and a
+hallucination traced to a bad example string in a tool description); Part
+E (browser automation, Playwright/CDP) is BUILT but **not yet working end
+to end** — see `handoff.md` for the current debugging state, which is
+substantial and unresolved as of this note. Gesture-to-action wiring (the
+other original Part D item) still not started/scoped. Milestone 13
+(settings + persistent session log) is fully done and confirmed, including
+a "Clear" button on the session log. Milestone 19 Part A (system usage
+query tool) is also confirmed working.
+
+A significant architecture investigation happened this session: adopting
+Nous Research's "Hermes Agent" (a full third-party agentic runtime) was
+researched and deliberately shelved — tested directly against qwen3.5:9b
+on this machine's 12GB VRAM and found unreliable, corroborated by an
+identical failure reported in Hermes Agent's own GitHub issues at the same
+VRAM budget. Full reasoning: `docs/decisions.md`. The takeaway that matters
+for future model choices: this machine's 9B-class model genuinely
+struggles with heavy multi-tool agentic prompting, not just Hermes Agent's
+specifically — the "comfortably runs 7-8B" hardware note above was
+written before this was tested for real, and should be read with that in
+mind, not as settled fact for agentic workloads specifically (single-tool-
+call, low-composition tasks still work fine at this size).
 
 ## Documentation
+- `handoff.md` (if present) — the latest session's handoff note: what was
+  just debugged, what's still broken, what decision is pending. Read this
+  FIRST, before the four files below — it's the current front door.
 - `docs/architecture.md` — the pipeline, stack table, directory structure,
   and how each *built* subsystem currently works (VAD, CV/MediaPipe,
   Electron dashboard internals, tool registry, orchestrator shape).

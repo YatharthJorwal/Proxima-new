@@ -7,7 +7,10 @@
     "file explorer": "explorer.exe",
     "task manager": "taskmgr.exe",
     "settings": "ms-settings:",
-    "chrome": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    "chrome": {
+      "path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+      "args": ["--remote-debugging-port=9222"]
+    },
     "spotify": "spotify.exe",
 
     "microsoft edge": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",

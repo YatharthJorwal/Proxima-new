@@ -1134,6 +1134,164 @@ the wrong reason (nothing was actually broken) rather than testing what
 its name claimed. Better to have no test here than one that looks like
 coverage but isn't.
 
+## Milestone 13, second slice: Settings panel
+
+Three real decisions asked before building rather than defaulted on, same
+posture as Part B's confirmation mechanism:
+
+1. **Where it lives**: modal/overlay opened by a button, not a new
+   dashboard card or a separate page. User's call.
+2. **How it persists**: left as "your call" by the user. Chose a separate
+   flat JSON file (`~/.proxima/settings.json`, `PROXY_SETTINGS_FILE`
+   overridable) layered OVER `.env`, rather than parsing and rewriting
+   `.env` directly. Reasoning: `.env` is a hand-edited file with the
+   user's own comments and formatting; a programmatic rewrite that only
+   understands 17 specific keys risks mangling anything else in it. A
+   separate file never touches `.env` at all, and matches the same flat-
+   JSON-file shape `core/memory.ts` and `core/sessionLog.ts` already use
+   for local persistence — one more consistent pattern instead of a new
+   one. Mental model: a value saved here always wins over `.env`; a blank
+   field, saved, removes the override rather than persisting an empty
+   string, falling back to `.env` instead.
+3. **Scope**: user chose "everything, including API keys/secrets" over a
+   curated subset. All 17 known settings across the codebase are
+   editable. Secret-shaped fields (`ELEVENLABS_API_KEY`,
+   `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`) render as password
+   fields behind a single "show secret values" toggle — not a new
+   security boundary, since `settings.json` sits at the same plaintext-
+   on-disk, single-user trust level `.env` already has, just a small
+   shoulder-surfing courtesy in the UI itself.
+
+**The real gotcha, worth remembering — same shape as this session's
+`vi.hoisted()` testing lesson, just in production code instead of a
+test file.** `core/settings.ts` has to apply `settings.json`'s contents
+to `process.env` before `main.ts`/`assistant.ts`'s own imports pull in
+`engine.ts` and, transitively, every module that reads its own config at
+top-level scope (`tts.ts`, `gmail.ts`, `memory.ts`, `sessionLog.ts`,
+`runScript.ts`, and more). A plain exported function the entry point
+calls explicitly does NOT achieve this: by the time any statement in the
+importing file's own body runs — even the very first line after its
+imports — every module in that file's entire import graph has already
+finished executing, including anything imported later in the same file.
+The only reliable fix is the same one `dotenv/config` itself already
+uses: make loading a MODULE-LEVEL side effect of importing the file at
+all (`settings.ts` calls its own `applySavedSettingsToEnv()` at the
+bottom of the file, unconditionally), and import that file second, right
+after `dotenv/config`, before anything else. Get the ordering wrong and
+the failure mode is silent — every saved setting simply does nothing,
+with no error anywhere — exactly the "looks fine, isn't" shape the
+`vi.hoisted()` bug had.
+
+One consequence of that: `core/settings.ts`'s own load path
+(`loadSavedSettingsSync()`) uses `fs.readFileSync`, not the `fs/promises`
+pattern every other storage file in this codebase uses. Deliberate, not
+an inconsistency — it's the one file that has to finish before the
+import graph it's racing against even starts.
+
+Bundled into the same patch rather than shipped separately (per the
+user's own request to stop sending one-off patches for small things):
+dropping the "Milestone 7 — hand tracking" tag from the CAMERA card
+(pulled forward from Milestone 14's planned scope list — see that
+section), and fixing a stale line in this file's own "Personality/tone"
+section that said the FRIDAY-style "sir" address hadn't shipped yet when
+it actually had (this file just hadn't been updated to match — this
+file's own FRIDAY/CREATOR_BIO entry earlier on was already correct).
+
+## Milestone 10, Hermes Agent investigated and shelved (not adopted)
+
+Real trigger: hardcoded/limited tool coverage kept failing on genuinely
+judgment-heavy or multi-step requests ("play music by my mood," complex
+chained tasks), and a separate concrete bug (volume control ignoring a
+requested delta amount, always moving by a fixed default step). Led to a
+real architecture conversation rather than just patching examples one at
+a time.
+
+Researched (not assumed) two different things both called "Hermes":
+the Hermes function-calling prompt format (a training convention, not
+software) versus Hermes Agent, a full open-source agent runtime Nous
+Research shipped February 2026 — persistent memory, autonomous skill
+creation, 40-70+ built-in tools, local Ollama support. The second one is
+what would actually address "no matter how much we hardcode, it's always
+limited," since it grows its own tool coverage instead of needing every
+capability hand-built.
+
+Tested directly (Path C — try it standalone before deciding, same
+"feasibility researched, not assumed" instinct as the M16 iPhone/M22
+phone-call investigations) rather than adopting or dismissing it from
+documentation alone: ran Hermes Agent locally against qwen3.5:9b (12GB
+VRAM). Result: poor — hallucinating, refusing, hitting capability limits.
+Corroborated independently: a Nous Research GitHub issue
+(NousResearch/hermes-agent#25041) reports the identical failure on the
+identical VRAM budget, with the maintainers' own diagnosis being specific
+— "Hermes's massive system prompt (+10K tokens, 30+ tool schemas, memory
+injection) overwhelms small models," not that 9B models can't call tools
+at all. Worth remembering: this indicts qwen3.5:9b driving HERMES AGENT's
+heavy harness specifically, not necessarily qwen3.5:9b driving Proxima's
+own much leaner tool list and system prompt — a genuinely different
+cognitive load, not yet separately tested.
+
+Decision: shelve Hermes Agent adoption, keep building Proxima's own
+orchestrator. Reasoning, not just "it didn't work today": adopting Hermes
+Agent's runtime wholesale would mean re-verifying (not re-deriving) every
+safety property already reasoned through here — Part B's confirmation
+gate, the transparency principle, `preload.ts`'s narrow-verbs philosophy —
+against a large, fast-moving, third-party autonomous system that would
+now be the thing with actual PC access. That's a bigger commitment than
+the actual bottleneck (a 9B model's capability ceiling under heavy load)
+needs solved. Two things stay open, worth a look before writing off local
+models at this VRAM tier entirely: a same-VRAM model swap (Gemma 4 12B
+specifically called out across multiple sources for tool-calling *format
+reliability*, not raw intelligence, versus similarly-sized Qwen models),
+and an optional cloud-escalation tier gated behind a user-supplied API
+key for the rare request the local tiers genuinely can't do — newly
+scoped here, not previously documented anywhere despite being asked
+about as if it already was.
+
+Also corrected in this conversation: this file already had the FRIDAY/
+"sir" personality change and its reasoning recorded correctly;
+project-status.md's copy of that item was stale (see that file's
+"Personality/tone" section).
+
+## Milestone 10 Part E: browser automation — three real decisions, asked not defaulted on
+
+Same posture as Part B's confirmation mechanism. Full technical
+writeup lives in project-status.md's Part E section (architecture,
+element-labeling, confirmation reuse, test coverage) — this entry is
+the reasoning behind the three choices themselves:
+
+1. **Real Chrome profile, not an isolated one.** User's call, made with
+   the tradeoff stated plainly first: real logins and no separate
+   authentication needed, versus real stakes if the wrong thing gets
+   clicked inside a session that's actually the user's own.
+2. **Confirmation only for committing actions**, not every click/type.
+   Confirming everything would turn even "search YouTube and hit play"
+   into a multi-turn back-and-forth, defeating the point; the chosen
+   split (read/navigate/type unconfirmed, submit/buy/delete/send gated)
+   mirrors the trust level `browse.ts` already has for the unconfirmed
+   half, and Part B's mechanism exactly for the gated half.
+3. **Visible with an animated cursor, not headless.** User explicitly
+   wants to watch it work and intervene in real time if something looks
+   wrong — directly in the spirit of this project's transparency
+   principle, applied to a tool that can now act on real webpages, not
+   just PC-local actions.
+
+Calibration given alongside the visible-cursor build, worth remembering
+before the first real test: the cursor being visible and smooth doesn't
+mean the reasoning behind where it clicks got any smarter — that's still
+qwen 9b, bounded and nerfed, the same model this whole conversation
+established has real limits. The visual will outpace the underlying
+capability; worth not mistaking a good-looking click for a reliably
+correct one on the first few real runs.
+
+Commit-detection heuristic (keyword list + element type + a model-set
+`may_commit` flag, combined via OR) deliberately biased toward false
+positives over false negatives: an unnecessary confirmation costs mild
+annoyance, a missed one could mean an actual unconfirmed purchase or
+deletion. `browser_type` was scoped WITHOUT a "press Enter to submit"
+option specifically to avoid a second, differently-shaped, harder-to-
+heuristically-judge commit decision for text fields — pushing all
+of them through the one already-reasoned-through click heuristic instead.
+
 ## Milestone 19 Part A: query tools are a new shape, not just another action tool
 
 `get_system_usage` is the first *query* tool in this codebase - every
