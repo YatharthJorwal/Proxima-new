@@ -25,9 +25,12 @@ interface AppTarget {
 }
 
 interface CommandsConfig {
-  // Every existing entry is a plain string, unaffected by this change.
-  // {path, args} is additive - its one current use is chrome's entry,
-  // needing --remote-debugging-port for commands/browserAutomation.ts.
+  // Every current entry is a plain string. {path, args} support is kept
+  // for any app that genuinely needs launch flags in the future — it was
+  // chrome's entry until browserAutomation.ts moved to launching its own
+  // dedicated Chrome profile directly (Playwright's launchPersistentContext)
+  // instead of attaching to one opened via this command, so the flag
+  // that used to live here isn't needed anymore.
   openApp: Record<string, string | AppTarget>;
 }
 

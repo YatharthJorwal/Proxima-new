@@ -6,34 +6,45 @@
  * screen. This is that stretch goal, scoped through a real conversation
  * (not defaulted on) the same way Part B's confirmation mechanism was:
  *
- * 1. Drives the user's ACTUAL Chrome profile (their choice, over an
- *    isolated one) — real logins, real usefulness, real stakes if it
- *    clicks the wrong thing.
+ * 1. Drives a dedicated Chrome profile of Proxy's own — a REVERSAL of
+ *    the original v1 choice ("the user's actual Chrome profile — real
+ *    logins, real usefulness, real stakes if it clicks the wrong
+ *    thing"). That broke in practice: Chrome only lets one process
+ *    touch a given profile at a time, so whichever of (the user's
+ *    everyday Chrome / Proxy's automation) launched most recently won
+ *    the single remote-debugging port, and no amount of manually
+ *    closing windows fixed it reliably. A separate profile removes the
+ *    conflict entirely, at the cost of starting logged out of
+ *    everything — Gmail, GitHub, whatever a task needs — the first
+ *    time each site is used through it.
  * 2. Confirmation only for "committing" actions (submit/buy/delete/
  *    send), not every click/type — otherwise this would turn every
  *    multi-step task into a back-and-forth.
  * 3. Visible, not headless, with an animated cursor — the user explicitly
  *    wants to watch it work and be able to intervene in real time.
  *
- * ARCHITECTURE — attaching, not launching:
- * Chrome only lets one process touch a given profile at a time, so this
- * can't launch its own second Chrome instance pointed at the user's real
- * profile — it has to ATTACH to one already running with remote
- * debugging enabled. config/commands.json's "chrome" entry now launches
- * Chrome with --remote-debugging-port=9222 (see launch.ts and openApp.ts)
- * whenever the user says "open chrome" — CDP_PORT below has to keep
- * matching that number, since a JSON config file can't read this file's
- * constant or an env var; if you ever change one, change both. If Chrome
- * is already open WITHOUT that flag (started some other way), this can't
- * attach to it — connectOverCDP() will fail, and the honest answer is to
- * say so and suggest relaunching via "open chrome" or the debug shortcut,
- * not to silently do nothing or crash.
+ * ARCHITECTURE — launching and owning a persistent profile, not
+ * attaching to something the user opened:
+ * v1 attached (connectOverCDP) to Chrome the user had to launch
+ * manually via "open chrome" (which added --remote-debugging-port=9222
+ * to config/commands.json's "chrome" entry for exactly this). That's
+ * gone. launchPersistentContext() below launches Chrome itself, pointed
+ * at PROFILE_DIR — a folder that belongs entirely to Proxy, separate
+ * from the user's own Chrome profile — the first time any browser_*
+ * tool actually gets called. No voice command or config flag is needed
+ * to "open" it first; it's the same off-until-first-used shape as the
+ * dashboard's Camera card. config/commands.json's "chrome" entry (the
+ * user's own "open chrome" command, for their everyday browsing) no
+ * longer carries the debug-port flag — it was only ever there for this
+ * file's old attach model, and leaving it on would just open an unused
+ * debug port on the user's regular browsing for no reason.
  *
  * Note for anyone worried about the "controlled by automated test
- * software" banner Chrome sometimes shows: that's specific to
- * `--enable-automation` / launching your own throwaway browser, which
- * connectOverCDP() (attaching to an already-running, normally-launched
- * Chrome) doesn't add. Normal browsing is otherwise unaffected.
+ * software" banner Chrome sometimes shows: launchPersistentContext()
+ * launches via Playwright, which does add that banner (v1's
+ * connectOverCDP-onto-a-normally-launched-Chrome didn't). Expected and
+ * harmless here — if anything it's a useful, visible signal that this
+ * particular window is the automation one, not the user's own browsing.
  *
  * ELEMENT MODEL — labeled IDs, not free-text or raw coordinates:
  * The model can't see the page, so every action here returns a compact,
@@ -75,53 +86,22 @@
  * differently-shaped guess for text fields.
  */
 
-import { chromium, Browser, Page } from "playwright-core";
-import { spawn } from "child_process";
+import { chromium, BrowserContext, Page } from "playwright-core";
+import * as path from "path";
+import * as os from "os";
 import { classifyYesNo } from "./confirmationUtils";
 
-// Must match config/commands.json's chrome "args" entry — see this
-// file's docblock.
-const CDP_PORT = 9222;
+// Proxy's own Chrome profile, entirely separate from the user's everyday
+// one — see this file's docblock for why. Overridable the same way
+// PROXY_WORKSPACE_DIR is (fileTools.ts), and listed in settings.ts's
+// SETTINGS_KEYS so it shows up in the dashboard's Settings modal too.
+const PROFILE_DIR = process.env.PROXY_CHROME_PROFILE_DIR || path.join(os.homedir(), "ProxyChromeProfile");
 
-const NOT_RUNNING_MESSAGE =
-  "I can't reach Chrome for that - it isn't open. " + 'Say "open chrome" and try again.';
-
-/**
- * Distinguishes two genuinely different failure causes instead of
- * collapsing them into one generic message - real-machine testing
- * showed the plain "not reachable" line was misleading in the common
- * case: Chrome was already running (just never launched with the debug
- * flag, since that flag only applies on a truly fresh launch - Chrome's
- * single-instance behavior means invoking it again while already open
- * just activates the existing window, silently ignoring new command-line
- * arguments). Best-effort - if the check itself fails for any reason,
- * falls back to the plain not-running message rather than blocking on a
- * diagnostic that isn't the actual point.
- */
-function isChromeProcessRunning(): Promise<boolean> {
-  return new Promise((resolve) => {
-    const ps = spawn("powershell.exe", [
-      "-WindowStyle",
-      "Hidden",
-      "-Command",
-      "if (Get-Process chrome -ErrorAction SilentlyContinue) { 'yes' } else { 'no' }",
-    ]);
-    let stdout = "";
-    ps.stdout.on("data", (chunk) => (stdout += chunk));
-    ps.on("close", () => resolve(stdout.trim() === "yes"));
-    ps.on("error", () => resolve(false));
-  });
-}
-
-async function buildNotReachableMessage(): Promise<string> {
-  const alreadyRunning = await isChromeProcessRunning();
-  if (!alreadyRunning) return NOT_RUNNING_MESSAGE;
-
+function buildLaunchFailedMessage(err: unknown): string {
+  const detail = err instanceof Error ? err.message : String(err);
   return (
-    "Chrome's already running, but not with remote debugging on - that flag only takes effect on a genuinely " +
-    "fresh launch, so if it was already open, opening it again just activated the existing window instead of " +
-    "turning debugging on. Close every Chrome window completely (check the taskbar/system tray too - it can " +
-    'keep running in the background after the last window closes) and say "open chrome" again.'
+    `I couldn't reach Proxy's browser (${detail}). If a previous Proxy browser window is still ` +
+    "running in the background (check the taskbar/system tray), close it and try again."
   );
 }
 
@@ -161,7 +141,7 @@ interface ElementInfo {
 
 // Module-level, matching runScript.ts's "there's only one Proxy" style -
 // no need for anything fancier than single variables here either.
-let browser: Browser | null = null;
+let context: BrowserContext | null = null;
 let page: Page | null = null;
 let lastSnapshot: ElementInfo[] = [];
 
@@ -173,22 +153,32 @@ interface PendingBrowserClick {
 let pendingClick: PendingBrowserClick | null = null;
 
 /**
- * Attaches to (or reuses an existing attachment to) the user's real
- * Chrome, and returns the one tab Proxy drives. Proxy always drives
- * exactly one tab of its own — v1 deliberately doesn't try to guess
- * which of the user's other open tabs "the currently active one" might
- * be; if that turns out to matter, it's a scoped addition, not a rework.
+ * Launches (once) or reuses Proxy's own dedicated Chrome, and returns
+ * the one tab it drives. Proxy always drives exactly one tab of its
+ * own — v1 deliberately doesn't try to guess which of several open tabs
+ * "the currently active one" might be; if that turns out to matter,
+ * it's a scoped addition, not a rework. Self-healing on a launch
+ * failure: context/page get reset to null so the NEXT call gets a
+ * clean retry instead of getting stuck replaying the same broken state.
  */
 async function getPage(): Promise<Page> {
   if (page && !page.isClosed()) return page;
 
-  if (!browser || !browser.isConnected()) {
-    browser = await chromium.connectOverCDP(`http://localhost:${CDP_PORT}`);
+  try {
+    if (!context) {
+      context = await chromium.launchPersistentContext(PROFILE_DIR, {
+        channel: "chrome",
+        headless: false,
+        viewport: null, // a real, resizable window - not a fixed viewport
+      });
+    }
+    page = context.pages()[0] ?? (await context.newPage());
+    return page;
+  } catch (err) {
+    context = null;
+    page = null;
+    throw err;
   }
-
-  const context = browser.contexts()[0] ?? (await browser.newContext());
-  page = await context.newPage();
-  return page;
 }
 
 /**
@@ -296,7 +286,7 @@ async function animatedClick(target: Page, elementId: string): Promise<void> {
 }
 
 function connectionLooksDead(): boolean {
-  return !browser || !browser.isConnected() || !page || page.isClosed();
+  return !context || !page || page.isClosed();
 }
 
 export async function executeBrowserNavigate(args: { url?: string }): Promise<string> {
@@ -311,7 +301,9 @@ export async function executeBrowserNavigate(args: { url?: string }): Promise<st
     return `Opened ${normalized}.\n${formatSnapshot(snapshot)}`;
   } catch (err) {
     console.error("browser_navigate failed:", err);
-    return buildNotReachableMessage();
+    return connectionLooksDead()
+      ? buildLaunchFailedMessage(err)
+      : `I reached Proxy's browser but couldn't open that page — something went wrong.`;
   }
 }
 
@@ -322,7 +314,9 @@ export async function executeBrowserReadPage(): Promise<string> {
     return formatSnapshot(snapshot);
   } catch (err) {
     console.error("browser_read_page failed:", err);
-    return buildNotReachableMessage();
+    return connectionLooksDead()
+      ? buildLaunchFailedMessage(err)
+      : `I reached Proxy's browser but couldn't read the page — something went wrong.`;
   }
 }
 
@@ -347,7 +341,7 @@ export async function executeBrowserClick(args: { element_id?: string; may_commi
     return `Clicked "${element.name}".\n${formatSnapshot(snapshot)}`;
   } catch (err) {
     console.error("browser_click failed:", err);
-    const detail = connectionLooksDead() ? ` ${await buildNotReachableMessage()}` : "";
+    const detail = connectionLooksDead() ? ` ${buildLaunchFailedMessage(err)}` : "";
     return `I tried to click "${element.name}" but something went wrong.${detail}`;
   }
 }
@@ -373,7 +367,7 @@ export async function executeBrowserType(args: { element_id?: string; text?: str
     return `Typed into "${element.name}".\n${formatSnapshot(snapshot)}`;
   } catch (err) {
     console.error("browser_type failed:", err);
-    const detail = connectionLooksDead() ? ` ${await buildNotReachableMessage()}` : "";
+    const detail = connectionLooksDead() ? ` ${buildLaunchFailedMessage(err)}` : "";
     return `I tried to type into "${element.name}" but something went wrong.${detail}`;
   }
 }
@@ -421,6 +415,6 @@ export function getPendingBrowserConfirmation(): { description: string } | null 
 export function resetBrowserAutomationState(): void {
   pendingClick = null;
   lastSnapshot = [];
-  browser = null;
+  context = null;
   page = null;
 }

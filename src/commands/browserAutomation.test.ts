@@ -1,21 +1,20 @@
 /**
- * Mocks playwright-core entirely — there's no real Chrome to attach to
- * in this sandbox, so every real-machine behavior here (does a click
- * actually land, does the cursor actually move smoothly, does
- * connectOverCDP actually fail when Chrome isn't running with debugging
- * on) is real-machine-confirmed territory, not sandbox-tested. What IS
- * tested here is the control-flow logic this file owns: does a
- * commit-shaped click get gated behind confirmation instead of running
- * immediately, does confirm/deny/unclear on the pending click behave
- * like run_script's equivalent, does an unknown element_id fail
- * honestly instead of guessing.
+ * Mocks playwright-core entirely — there's no real Chrome to launch in
+ * this sandbox, so every real-machine behavior here (does a click
+ * actually land, does the cursor actually move smoothly, does a genuine
+ * Chrome launch actually succeed) is real-machine-confirmed territory,
+ * not sandbox-tested. What IS tested here is the control-flow logic this
+ * file owns: does a commit-shaped click get gated behind confirmation
+ * instead of running immediately, does confirm/deny/unclear on the
+ * pending click behave like run_script's equivalent, does an unknown
+ * element_id fail honestly instead of guessing, does a launch failure
+ * produce an honest message instead of a silent hang.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { EventEmitter } from "events";
 
-const { mockConnectOverCDP, mockEvaluate, mockLocator, mockSpawn } = vi.hoisted(() => ({
-  mockConnectOverCDP: vi.fn(),
+const { mockLaunchPersistentContext, mockEvaluate, mockLocator } = vi.hoisted(() => ({
+  mockLaunchPersistentContext: vi.fn(),
   mockEvaluate: vi.fn(),
   mockLocator: {
     scrollIntoViewIfNeeded: vi.fn().mockResolvedValue(undefined),
@@ -23,31 +22,11 @@ const { mockConnectOverCDP, mockEvaluate, mockLocator, mockSpawn } = vi.hoisted(
     click: vi.fn().mockResolvedValue(undefined),
     pressSequentially: vi.fn().mockResolvedValue(undefined),
   },
-  mockSpawn: vi.fn(),
 }));
 
 vi.mock("playwright-core", () => ({
-  chromium: { connectOverCDP: mockConnectOverCDP },
+  chromium: { launchPersistentContext: mockLaunchPersistentContext },
 }));
-
-// Backs isChromeProcessRunning()'s "is chrome already running" PowerShell
-// check - real-machine-confirmed behavior (systemUsage.ts already uses
-// the same spawn+stdout pattern), mocked here so the two diagnostic
-// branches (chrome running vs. not) are actually covered by something
-// other than this sandbox's real "powershell.exe not found" ENOENT path.
-vi.mock("child_process", () => ({ spawn: mockSpawn }));
-
-/** Simulates a PowerShell child process that prints `stdoutText` and exits 0. */
-function fakeChromeCheckProcess(stdoutText: string) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const proc = new EventEmitter() as any;
-  proc.stdout = new EventEmitter();
-  process.nextTick(() => {
-    proc.stdout.emit("data", stdoutText);
-    proc.emit("close", 0);
-  });
-  return proc;
-}
 
 import {
   executeBrowserNavigate,
@@ -81,12 +60,10 @@ function makeFakePage() {
   };
 }
 
-function makeFakeBrowser(page: ReturnType<typeof makeFakePage>) {
-  const context = { newPage: vi.fn().mockResolvedValue(page) };
+function makeFakeContext(page: ReturnType<typeof makeFakePage>) {
   return {
-    isConnected: vi.fn().mockReturnValue(true),
-    contexts: vi.fn().mockReturnValue([context]),
-    newContext: vi.fn().mockResolvedValue(context),
+    pages: vi.fn().mockReturnValue([page]),
+    newPage: vi.fn().mockResolvedValue(page),
   };
 }
 
@@ -94,7 +71,7 @@ let currentPage: ReturnType<typeof makeFakePage>;
 
 beforeEach(() => {
   resetBrowserAutomationState();
-  mockConnectOverCDP.mockReset();
+  mockLaunchPersistentContext.mockReset();
   mockLocator.scrollIntoViewIfNeeded.mockClear();
   mockLocator.boundingBox.mockClear().mockResolvedValue({ x: 10, y: 10, width: 100, height: 20 });
   mockLocator.click.mockClear();
@@ -110,9 +87,7 @@ beforeEach(() => {
   );
 
   currentPage = makeFakePage();
-  mockConnectOverCDP.mockResolvedValue(makeFakeBrowser(currentPage));
-
-  mockSpawn.mockReset().mockImplementation(() => fakeChromeCheckProcess("no"));
+  mockLaunchPersistentContext.mockResolvedValue(makeFakeContext(currentPage));
 });
 
 describe("executeBrowserNavigate", () => {
@@ -128,32 +103,18 @@ describe("executeBrowserNavigate", () => {
     expect(currentPage.goto).toHaveBeenCalledWith("https://example.com", expect.anything());
   });
 
-  it("fails honestly when Chrome isn't running at all", async () => {
-    mockConnectOverCDP.mockReset().mockRejectedValue(new Error("ECONNREFUSED"));
+  it("fails honestly when launching Proxy's browser fails", async () => {
+    mockLaunchPersistentContext.mockReset().mockRejectedValue(new Error("Executable doesn't exist"));
     const result = await executeBrowserNavigate({ url: "example.com" });
-    expect(result).toMatch(/isn't open/i);
-    expect(result).toMatch(/say "open chrome"/i);
-  });
-
-  it("gives the more specific diagnosis when Chrome is running but not with debugging on (real-machine regression)", async () => {
-    // The actual bug this covers: Chrome only applies
-    // --remote-debugging-port on a genuinely fresh launch. If it was
-    // already open, "open chrome" just activates the existing window and
-    // silently ignores the flag - the plain "Chrome isn't open" message
-    // is actively misleading in this case, since it clearly is open.
-    mockConnectOverCDP.mockReset().mockRejectedValue(new Error("ECONNREFUSED"));
-    mockSpawn.mockImplementation(() => fakeChromeCheckProcess("yes"));
-
-    const result = await executeBrowserNavigate({ url: "example.com" });
-    expect(result).toMatch(/already running/i);
-    expect(result).toMatch(/close every chrome window/i);
-    expect(result).not.toMatch(/isn't open/i);
+    expect(result).toMatch(/couldn't reach proxy's browser/i);
+    expect(result).toMatch(/executable doesn't exist/i);
+    expect(result).toMatch(/still running in the background/i);
   });
 
   it("asks for a URL rather than guessing when none is given", async () => {
     const result = await executeBrowserNavigate({});
     expect(result).toMatch(/need a url/i);
-    expect(mockConnectOverCDP).not.toHaveBeenCalled();
+    expect(mockLaunchPersistentContext).not.toHaveBeenCalled();
   });
 });
 

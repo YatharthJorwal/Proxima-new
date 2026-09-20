@@ -18,7 +18,7 @@
  * .env directly and don't see the change take effect, check here first
  * — this file's value is still winning.
  *
- * Restart-to-apply, not live: every one of the ~17 known settings is
+ * Restart-to-apply, not live: every one of the ~18 known settings is
  * read from `process.env` once, at module load time, all over this
  * codebase (tts.ts, gmail.ts, memory.ts, sessionLog.ts, runScript.ts,
  * engine.ts, fileTools.ts, main.ts). Rearchitecting every one of those
@@ -68,6 +68,7 @@ export const SETTINGS_KEYS = [
   "PROXY_ORCHESTRATOR_MAX_STEPS",
   "PROXY_SCRIPT_TIMEOUT_MS",
   "PROXY_WORKSPACE_DIR",
+  "PROXY_CHROME_PROFILE_DIR",
   "PROXY_MEMORY_FILE",
   "PROXY_SESSION_LOG_FILE",
   "PROXY_VAD_MAX_MS",

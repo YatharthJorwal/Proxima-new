@@ -36,6 +36,11 @@ import { contextBridge, ipcRenderer, IpcRendererEvent } from "electron";
 const CHANNELS = [
   "ready",
   "busy",
+  // Milestone 14 bug fix — fires when typed text is accepted while busy
+  // and held for after the current request finishes (see engine.ts's
+  // pendingText docs), so the dashboard can show "queued" instead of
+  // implying the text was lost.
+  "queued",
   "listening",
   "speech-start",
   "transcribing",
@@ -81,6 +86,12 @@ contextBridge.exposeInMainWorld("proxy", {
   submitText: (text: string) => {
     if (typeof text !== "string") return;
     ipcRenderer.send("proxy:submit-text", text);
+  },
+  // Milestone 14 — the Input box's mic icon. Same channel-per-verb
+  // pattern as submitText: no payload, main.ts's triggerVoiceOrCancel()
+  // is the single implementation both this and the F9 hotkey call.
+  triggerVoice: () => {
+    ipcRenderer.send("proxy:trigger-voice");
   },
   // Milestone 13 — the renderer already knows exactly what it's showing
   // in the SESSION LOG card (appendLog() in renderer.js) and how it's

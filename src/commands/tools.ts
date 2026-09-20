@@ -353,7 +353,7 @@ export const TOOLS: Record<string, ProxyTool> = {
       function: {
         name: "browser_navigate",
         description:
-          "Open a URL in Proxy's browser tab, for a task that will need clicking or typing afterward - e.g. before adding something to a cart, playing a specific video, or filling in a form. Returns a numbered list of the page's clickable/typeable elements for browser_click/browser_type to reference. For just opening or searching a site with nothing further to do, use browse instead - it's faster and doesn't need Chrome's remote debugging to be on.",
+          "Open a URL in Proxy's browser tab, for a task that will need clicking or typing afterward - e.g. before adding something to a cart, playing a specific video, or filling in a form. Returns a numbered list of the page's clickable/typeable elements for browser_click/browser_type to reference. For just opening or searching a site with nothing further to do, use browse instead - it's faster and doesn't launch Proxy's separate automation browser.",
         parameters: {
           type: "object",
           properties: {

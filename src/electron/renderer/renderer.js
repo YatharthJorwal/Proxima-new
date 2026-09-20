@@ -36,6 +36,7 @@ const outputBox = document.getElementById("outputBox");
 const inputForm = document.getElementById("inputForm");
 const inputText = document.getElementById("inputText");
 const inputSend = document.getElementById("inputSend");
+const micBtn = document.getElementById("micBtn");
 const orbStage = document.getElementById("orbStage");
 const orbStateLabel = document.getElementById("orbStateLabel");
 const statusState = document.getElementById("statusState");
@@ -81,15 +82,15 @@ const activityFinal = document.getElementById("activityFinal");
 const activityFinalText = document.getElementById("activityFinalText");
 
 // Rotating status words for the ONE genuinely-indeterminate wait in this
-// pipeline: a smart-tier "Deciding" row. Fast-tier decisions resolve in
-// a few hundred ms, so they just show "Deciding" plainly — no point
-// animating something that's already over by the time you'd notice.
-// Kept short and dry, matching Proxy's own personality prompt (llm.ts)
-// rather than going for full whimsy.
+// pipeline: a smart-tier "Analyzing Input" row. Fast-tier decisions
+// resolve in a few hundred ms, so they just show the label plainly — no
+// point animating something that's already over by the time you'd
+// notice. Kept short and dry, matching Proxy's own personality prompt
+// (llm.ts) rather than going for full whimsy.
 const SMART_TIER_WORDS = ["Thinking it over", "Working the problem", "Weighing the options", "Doing the math", "Mulling it over"];
 
 let currentRow = null; // the one live (unresolved) row, if any
-let lastDecidingRow = null; // most recent Deciding row — thinking traces attach here
+let lastDecidingRow = null; // most recent Analyzing Input row — thinking traces attach here
 let turnInProgress = false; // see the "transcribed" handler below for why this exists
 
 function fmtElapsed(ms) {
@@ -312,7 +313,43 @@ function timestamp(date) {
   return (date || new Date()).toLocaleTimeString([], { hour12: false });
 }
 
-// Confirmed via a native dialog since this is irreversible - the whole
+// Milestone 14 fix — see index.html's comment on #confirmOverlay for why
+// this replaces window.confirm(). Promise-based so call sites can still
+// just `if (!(await showConfirm(...))) return;`, same shape as before.
+const confirmOverlay = document.getElementById("confirmOverlay");
+const confirmMessage = document.getElementById("confirmMessage");
+const confirmOkBtn = document.getElementById("confirmOkBtn");
+const confirmCancelBtn = document.getElementById("confirmCancelBtn");
+let resolveConfirm = null;
+
+function showConfirm(message, okLabel = "OK") {
+  confirmMessage.textContent = message;
+  confirmOkBtn.textContent = okLabel;
+  confirmOverlay.classList.remove("hidden");
+  confirmOkBtn.focus();
+  return new Promise((resolve) => {
+    resolveConfirm = resolve;
+  });
+}
+
+function closeConfirm(result) {
+  confirmOverlay.classList.add("hidden");
+  if (resolveConfirm) {
+    resolveConfirm(result);
+    resolveConfirm = null;
+  }
+}
+
+confirmOkBtn.addEventListener("click", () => closeConfirm(true));
+confirmCancelBtn.addEventListener("click", () => closeConfirm(false));
+confirmOverlay.addEventListener("click", (event) => {
+  if (event.target === confirmOverlay) closeConfirm(false);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !confirmOverlay.classList.contains("hidden")) closeConfirm(false);
+});
+
+// Confirmed via an in-app modal since this is irreversible - the whole
 // point of Milestone 13's persistence is that history survives a
 // relaunch, so clearing it should be a deliberate act, not a stray
 // click. Clears the DOM immediately rather than waiting on the IPC
@@ -320,11 +357,13 @@ function timestamp(date) {
 // (same shape as persistLogEntry), and there's nothing for the
 // renderer to wait for.
 const clearLogBtn = document.getElementById("clearLogBtn");
-clearLogBtn.addEventListener("click", () => {
-  if (!confirm("Clear the session log? This can't be undone.")) return;
+clearLogBtn.addEventListener("click", async () => {
+  const ok = await showConfirm("Clear the session log? This can't be undone.", "Clear");
+  if (!ok) return;
   log.innerHTML = "";
   log.appendChild(logEmpty);
   window.proxy.clearLog();
+  inputText.focus();
 });
 
 // Milestone 13 — opts.timestamp (an ISO string) lets hydrated history
@@ -412,6 +451,8 @@ window.proxy.on("listening", (info) => {
   statusDot.classList.add("active");
   statusDot.classList.remove("alarm");
   setOrbState("listening");
+  micBtn.classList.add("listening");
+  micBtn.setAttribute("aria-pressed", "true");
   appendLog("status", `listening (auto-stops after a pause, max ${Math.round(info.maxMs / 1000)}s)`);
   outputBox.innerHTML = '<span class="output-empty">Listening…</span>';
 });
@@ -436,7 +477,7 @@ window.proxy.on("no-speech", () => {
 
 window.proxy.on("transcribing", () => {
   resolveActivityRow(currentRow);
-  addActivityRow("Transcribing");
+  addActivityRow("Understanding your words");
 });
 
 window.proxy.on("transcribed", (text) => {
@@ -451,6 +492,13 @@ window.proxy.on("transcribed", (text) => {
   } else {
     resolveActivityRow(currentRow, { sub: truncate(text, 60) });
   }
+  // A queued submission (see the Typed input section below) has now
+  // actually started — clear the box and re-enable Send.
+  if (queuedText !== null) {
+    inputText.value = "";
+    queuedText = null;
+    inputSend.disabled = false;
+  }
   setOrbState("thinking");
   appendLog("heard", text);
   outputBox.innerHTML = '<span class="output-empty">Proxy is thinking…</span>';
@@ -464,7 +512,9 @@ window.proxy.on("transcribed", (text) => {
 
 window.proxy.on("deciding", (tier) => {
   resolveActivityRow(currentRow);
-  lastDecidingRow = addActivityRow("Deciding", {
+  // Milestone 14 relabeling: "Deciding" → "Analyzing Input" (the
+  // plan's own example) — same real fast/smart-tier timing underneath.
+  lastDecidingRow = addActivityRow("Analyzing Input", {
     sub: tier === "smart" ? "smart tier" : "fast tier",
     rotateWords: tier === "smart",
   });
@@ -472,7 +522,7 @@ window.proxy.on("deciding", (tier) => {
 
 window.proxy.on("tool-start", (name) => {
   resolveActivityRow(currentRow);
-  addActivityRow(`Executing: ${name}`, { action: true });
+  addActivityRow(`Running: ${name}`, { action: true });
   flashAction();
 });
 
@@ -525,6 +575,15 @@ window.proxy.on("speaking", () => {
 window.proxy.on("cancelled", () => {
   resolveActivityRow(currentRow, { stopped: true });
   appendLog("status", "stopped");
+  // engine.ts's cancel() also drops any queued typed text (a stop really
+  // means stop) — mirror that here: nothing will fire it, so release
+  // Send now rather than leaving it stuck disabled. The text itself
+  // stays in the box either way; it was never cleared, so the user can
+  // just hit send again if they still want it sent.
+  if (queuedText !== null) {
+    queuedText = null;
+    inputSend.disabled = false;
+  }
   // The orchestrator's own honest "Stopped — ..." text still arrives
   // via the normal "reply" event right after this — nothing more to do
   // here beyond marking the interrupted row so it doesn't read as done.
@@ -533,6 +592,8 @@ window.proxy.on("cancelled", () => {
 window.proxy.on("idle", () => {
   turnInProgress = false;
   statusDot.classList.remove("active");
+  micBtn.classList.remove("listening");
+  micBtn.setAttribute("aria-pressed", "false");
   resolveActivityRow(currentRow); // safety net - nothing should normally still be open here
   statusState.textContent = "Ready";
   if (!errorFlashTimeout) setOrbState("idle");
@@ -570,127 +631,231 @@ window.proxy.on("error", (message) => {
 // must keep working even if the camera can't start.
 // ================================================================
 
-async function setupCameraAndHandTracking() {
-  const video = document.getElementById("cameraVideo");
-  const overlay = document.getElementById("cameraOverlay");
-  const status = document.getElementById("cameraStatus");
-  const ctx = overlay.getContext("2d");
+const cameraVideo = document.getElementById("cameraVideo");
+const cameraOverlay = document.getElementById("cameraOverlay");
+const cameraStatus = document.getElementById("cameraStatus");
+const cameraCtx = cameraOverlay.getContext("2d");
+const cameraOffPanel = document.getElementById("cameraOffPanel");
+const cameraFrame = document.getElementById("cameraFrame");
+const cameraControls = document.getElementById("cameraControls");
+const cameraOnBtn = document.getElementById("cameraOnBtn");
+const cameraOffBtn = document.getElementById("cameraOffBtn");
+const cameraStateTag = document.getElementById("cameraStateTag");
+const handTrackingToggle = document.getElementById("handTrackingToggle");
 
-  let stream;
+let cameraStream = null;
+let HandLandmarkerCls = null; // holds the class itself, for its static HAND_CONNECTIONS
+let handLandmarker = null;
+let handTrackingOn = false;
+let handLoopRunning = false;
+
+function resizeCameraOverlay() {
+  cameraOverlay.width = cameraOverlay.clientWidth;
+  cameraOverlay.height = cameraOverlay.clientHeight;
+}
+window.addEventListener("resize", resizeCameraOverlay);
+
+function toCanvasMapper() {
+  // object-fit: cover mapping — the video element is scaled up to fill
+  // the container and cropped (see .camera-frame video in style.css),
+  // so landmark coordinates (normalized 0-1 against the FULL camera
+  // frame) need that same scale+crop applied, or the overlay skeleton
+  // drifts away from the actual hand at the edges.
+  const vw = cameraVideo.videoWidth;
+  const vh = cameraVideo.videoHeight;
+  const cw = cameraOverlay.width;
+  const ch = cameraOverlay.height;
+  if (!vw || !vh || !cw || !ch) return null;
+  const scale = Math.max(cw / vw, ch / vh);
+  const offsetX = (vw - cw / scale) / 2;
+  const offsetY = (vh - ch / scale) / 2;
+  return (nx, ny) => [(nx * vw - offsetX) * scale, (ny * vh - offsetY) * scale];
+}
+
+function drawHands(result) {
+  const cw = cameraOverlay.width;
+  const ch = cameraOverlay.height;
+  cameraCtx.clearRect(0, 0, cw, ch);
+  const toCanvas = toCanvasMapper();
+  if (!toCanvas) return;
+
+  cameraCtx.strokeStyle = "#3fa9ff";
+  cameraCtx.fillStyle = "#7cd4ff";
+  cameraCtx.lineWidth = 2;
+
+  for (const hand of result.landmarks) {
+    for (const { start, end } of HandLandmarkerCls.HAND_CONNECTIONS) {
+      const [ax, ay] = toCanvas(hand[start].x, hand[start].y);
+      const [bx, by] = toCanvas(hand[end].x, hand[end].y);
+      cameraCtx.beginPath();
+      cameraCtx.moveTo(ax, ay);
+      cameraCtx.lineTo(bx, by);
+      cameraCtx.stroke();
+    }
+    for (const point of hand) {
+      const [x, y] = toCanvas(point.x, point.y);
+      cameraCtx.beginPath();
+      cameraCtx.arc(x, y, 3, 0, Math.PI * 2);
+      cameraCtx.fill();
+    }
+  }
+}
+
+function handLoop() {
+  if (!handLoopRunning) return; // toggled off — stop rescheduling, not just skip a frame
+  requestAnimationFrame(handLoop);
+  if (cameraVideo.readyState < 2) return; // not enough data for a frame yet
+  let result;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    result = handLandmarker.detectForVideo(cameraVideo, performance.now());
   } catch (err) {
-    status.textContent = `Camera unavailable (${err.name || "error"}) — check Windows camera permissions.`;
+    return; // skip this frame rather than spamming the status line
+  }
+  drawHands(result);
+  const count = result.landmarks.length;
+  cameraStatus.textContent = count === 0 ? "No hand detected" : `${count} hand${count > 1 ? "s" : ""} detected`;
+}
+
+async function turnCameraOn() {
+  cameraOnBtn.disabled = true;
+  cameraStatus.textContent = "Requesting camera…";
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+  } catch (err) {
+    cameraStatus.textContent = `Camera unavailable (${err.name || "error"}) — check Windows camera permissions.`;
+    cameraOnBtn.disabled = false;
     return;
   }
 
-  video.srcObject = stream;
+  cameraVideo.srcObject = cameraStream;
   await new Promise((resolve) => {
-    video.onloadedmetadata = () => resolve();
+    cameraVideo.onloadedmetadata = () => resolve();
   });
-  await video.play();
+  await cameraVideo.play();
 
-  status.textContent = "Loading hand-tracking model…";
-
-  let HandLandmarker, handLandmarker;
-  try {
-    const mediapipe = await import("./vendor/mediapipe/vision_bundle.mjs");
-    HandLandmarker = mediapipe.HandLandmarker;
-    const fileset = await mediapipe.FilesetResolver.forVisionTasks("./vendor/mediapipe/wasm");
-    handLandmarker = await HandLandmarker.createFromOptions(fileset, {
-      baseOptions: { modelAssetPath: "./vendor/mediapipe/hand_landmarker.task" },
-      runningMode: "VIDEO",
-      numHands: 2,
-    });
-  } catch (err) {
-    status.textContent = 'Hand-tracking model not found — run "npm run setup:cv", then rebuild.';
-    return; // camera preview still works, just no tracking overlay
-  }
-
-  function resizeOverlay() {
-    overlay.width = overlay.clientWidth;
-    overlay.height = overlay.clientHeight;
-  }
-  window.addEventListener("resize", resizeOverlay);
-  resizeOverlay();
-
-  function toCanvasMapper() {
-    // object-fit: cover mapping — the video element is scaled up to
-    // fill the container and cropped (see .camera-frame video in
-    // style.css), so landmark coordinates (normalized 0-1 against the
-    // FULL camera frame) need that same scale+crop applied, or the
-    // overlay skeleton drifts away from the actual hand at the edges.
-    const vw = video.videoWidth;
-    const vh = video.videoHeight;
-    const cw = overlay.width;
-    const ch = overlay.height;
-    if (!vw || !vh || !cw || !ch) return null;
-    const scale = Math.max(cw / vw, ch / vh);
-    const offsetX = (vw - cw / scale) / 2;
-    const offsetY = (vh - ch / scale) / 2;
-    return (nx, ny) => [(nx * vw - offsetX) * scale, (ny * vh - offsetY) * scale];
-  }
-
-  function drawHands(result) {
-    const cw = overlay.width;
-    const ch = overlay.height;
-    ctx.clearRect(0, 0, cw, ch);
-    const toCanvas = toCanvasMapper();
-    if (!toCanvas) return;
-
-    ctx.strokeStyle = "#3fa9ff";
-    ctx.fillStyle = "#7cd4ff";
-    ctx.lineWidth = 2;
-
-    for (const hand of result.landmarks) {
-      for (const { start, end } of HandLandmarker.HAND_CONNECTIONS) {
-        const [ax, ay] = toCanvas(hand[start].x, hand[start].y);
-        const [bx, by] = toCanvas(hand[end].x, hand[end].y);
-        ctx.beginPath();
-        ctx.moveTo(ax, ay);
-        ctx.lineTo(bx, by);
-        ctx.stroke();
-      }
-      for (const point of hand) {
-        const [x, y] = toCanvas(point.x, point.y);
-        ctx.beginPath();
-        ctx.arc(x, y, 3, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-  }
-
-  function loop() {
-    requestAnimationFrame(loop);
-    if (video.readyState < 2) return; // not enough data for a frame yet
-    let result;
-    try {
-      result = handLandmarker.detectForVideo(video, performance.now());
-    } catch (err) {
-      return; // skip this frame rather than spamming the status line
-    }
-    drawHands(result);
-    const count = result.landmarks.length;
-    status.textContent = count === 0 ? "No hand detected" : `${count} hand${count > 1 ? "s" : ""} detected`;
-  }
-  requestAnimationFrame(loop);
+  cameraOffPanel.classList.add("hidden");
+  cameraFrame.classList.remove("hidden");
+  cameraControls.classList.remove("hidden");
+  cameraStateTag.textContent = "CAM ON";
+  cameraStateTag.classList.add("on");
+  cameraStatus.textContent = "Camera on — hand tracking off";
+  cameraOnBtn.disabled = false;
+  resizeCameraOverlay();
 }
 
-setupCameraAndHandTracking().catch((err) => {
-  const status = document.getElementById("cameraStatus");
-  if (status) status.textContent = `Camera setup failed: ${err.message || err}`;
+function turnCameraOff() {
+  if (handTrackingOn) setHandTracking(false);
+  if (cameraStream) {
+    for (const track of cameraStream.getTracks()) track.stop();
+    cameraStream = null;
+  }
+  cameraVideo.srcObject = null;
+  cameraOffPanel.classList.remove("hidden");
+  cameraFrame.classList.add("hidden");
+  cameraControls.classList.add("hidden");
+  cameraStateTag.textContent = "CAM OFF";
+  cameraStateTag.classList.remove("on");
+  cameraStatus.textContent = "";
+}
+
+async function setHandTracking(on) {
+  if (on) {
+    handTrackingToggle.disabled = true;
+    cameraStatus.textContent = "Loading hand-tracking model…";
+    if (!handLandmarker) {
+      try {
+        const mediapipe = await import("./vendor/mediapipe/vision_bundle.mjs");
+        HandLandmarkerCls = mediapipe.HandLandmarker;
+        const fileset = await mediapipe.FilesetResolver.forVisionTasks("./vendor/mediapipe/wasm");
+        handLandmarker = await HandLandmarkerCls.createFromOptions(fileset, {
+          baseOptions: { modelAssetPath: "./vendor/mediapipe/hand_landmarker.task" },
+          runningMode: "VIDEO",
+          numHands: 2,
+        });
+      } catch (err) {
+        cameraStatus.textContent = 'Hand-tracking model not found — run "npm run setup:cv", then rebuild.';
+        handTrackingToggle.disabled = false;
+        return;
+      }
+    }
+    handTrackingOn = true;
+    handLoopRunning = true;
+    handTrackingToggle.textContent = "Hand tracking: On";
+    handTrackingToggle.setAttribute("aria-pressed", "true");
+    handTrackingToggle.disabled = false;
+    requestAnimationFrame(handLoop);
+  } else {
+    handTrackingOn = false;
+    handLoopRunning = false;
+    handTrackingToggle.textContent = "Hand tracking: Off";
+    handTrackingToggle.setAttribute("aria-pressed", "false");
+    handTrackingToggle.disabled = false;
+    cameraCtx.clearRect(0, 0, cameraOverlay.width, cameraOverlay.height);
+    if (cameraStream) cameraStatus.textContent = "Camera on — hand tracking off";
+  }
+}
+
+cameraOnBtn.addEventListener("click", () => {
+  turnCameraOn().catch((err) => {
+    cameraStatus.textContent = `Camera setup failed: ${err.message || err}`;
+    cameraOnBtn.disabled = false;
+  });
+});
+
+cameraOffBtn.addEventListener("click", turnCameraOff);
+
+handTrackingToggle.addEventListener("click", () => {
+  setHandTracking(!handTrackingOn).catch((err) => {
+    cameraStatus.textContent = `Hand tracking failed: ${err.message || err}`;
+    handTrackingToggle.disabled = false;
+  });
 });
 
 // ================================================================
 // Typed input (dashboard's real second way to talk to Proxy)
 // ================================================================
 
+// Milestone 14 bug fix: text used to vanish if you hit send while Proxy
+// was still busy — submitText() dropped it silently on the engine side,
+// but the box had already been cleared here regardless of whether it
+// actually got accepted. Now: if a turn is already in progress
+// (turnInProgress, set by the "listening"/"transcribed" handlers above),
+// leave the text sitting in the box instead of clearing it — engine.ts
+// holds it (pendingText) and runs it once the current request finishes,
+// never interrupting what's already in flight. The "transcribed" handler
+// below clears the box at the moment the queued text actually starts.
+let queuedText = null;
+
 inputForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const text = inputText.value.trim();
   if (!text) return;
   window.proxy.submitText(text);
-  inputText.value = "";
+  if (turnInProgress) {
+    queuedText = text;
+    inputSend.disabled = true;
+  } else {
+    inputText.value = "";
+  }
+});
+
+micBtn.addEventListener("click", () => {
+  window.proxy.triggerVoice();
+});
+
+// "/" focuses the Input box from anywhere (skipped while already typing
+// in any text field, so it still types a literal "/" there as normal).
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "/") return;
+  const active = document.activeElement;
+  const alreadyTyping = active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA");
+  if (alreadyTyping) return;
+  event.preventDefault();
+  inputText.focus();
+});
+
+window.proxy.on("queued", () => {
+  appendLog("status", "queued — will run once the current request finishes");
 });
 
 // ================================================================
@@ -715,6 +880,7 @@ const SETTINGS_FIELDS = [
   { group: "Assistant", key: "PROXY_ORCHESTRATOR_MAX_STEPS", label: "Max tool steps per request", type: "number" },
   { group: "Assistant", key: "PROXY_SCRIPT_TIMEOUT_MS", label: "Script timeout (ms)", type: "number" },
   { group: "Storage", key: "PROXY_WORKSPACE_DIR", label: "Workspace directory", type: "text" },
+  { group: "Browser automation", key: "PROXY_CHROME_PROFILE_DIR", label: "Chrome profile directory", type: "text" },
   { group: "Storage", key: "PROXY_MEMORY_FILE", label: "Memory file path", type: "text" },
   { group: "Storage", key: "PROXY_SESSION_LOG_FILE", label: "Session log file path", type: "text" },
   { group: "Voice detection", key: "PROXY_VAD_MAX_MS", label: "Max recording length (ms)", type: "number" },
@@ -804,4 +970,33 @@ settingsSaveBtn.addEventListener("click", () => {
   window.proxy.saveSettings(values).then((result) => {
     settingsStatus.textContent = result && result.ok ? "Saved — restart Proxy to apply." : "Save failed — see the console.";
   });
+});
+
+// ---------- Sidebar (Milestone 14 shell) ----------
+// Toggle only - no persistence across relaunch (defaults to collapsed
+// every time), matching this milestone's "shell only" scope. The
+// Dashboard/Settings distinction above ("real" vs. "disabled") is
+// enforced here too: only the Settings item gets a click handler,
+// wired to the exact same openSettingsModal() the topbar button already
+// calls, so it's a second entry point to something real, not a second
+// thing to maintain. The future-destination items intentionally get no
+// listener at all - they're visually dimmed and non-interactive, same
+// "honest, not decorative" rule as the COMING SOON card.
+
+const sidebar = document.getElementById("sidebar");
+const sidebarToggle = document.getElementById("sidebarToggle");
+const sidebarSettingsItem = document.getElementById("sidebarSettingsItem");
+
+sidebarToggle.addEventListener("click", () => {
+  const expanded = sidebar.classList.toggle("expanded");
+  document.body.classList.toggle("sidebar-expanded", expanded);
+  sidebarToggle.setAttribute("aria-expanded", String(expanded));
+});
+
+sidebarSettingsItem.addEventListener("click", openSettingsModal);
+sidebarSettingsItem.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    openSettingsModal();
+  }
 });

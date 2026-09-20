@@ -13,35 +13,74 @@
   instrument as the pipeline list beside it.
 
   Tokens:
-    --bg        #070a12   base background
-    --panel     #0d1220   card surface
-    --panel-2   #0a0e1a   slightly recessed surface (log, output box)
-    --hairline  #1b2438   borders
-    --ink       #e7ecf5   primary text
-    --ink-dim   #6b7793   secondary/meta text
-    --accent    #3fa9ff   primary glow (listening / active / links)
-    --accent-2  #7cd4ff   lighter accent for highlights
-    --action    #e8a33d   amber — "a real command actually fired"
-    --alarm     #ff5c5c   errors
+    --bg        #05070d   base background
+    --panel     #111a33   card surface
+    --panel-2   #0a0f1e   slightly recessed surface (log, output box)
+    --hairline  #2a3a63   borders
+    --ink       #f3f6fc   primary text
+    --ink-dim   #97a4c9   secondary/meta text
+    --accent    #4db2ff   primary glow (listening / active / links)
+    --accent-2  #93e0ff   lighter accent for highlights
+    --action    #f2ac48   amber — "a real command actually fired"
+    --alarm     #ff6b6b   errors
+
+  Milestone 14 contrast pass: --panel moved further from --bg (cards now
+  read as distinct surfaces instead of blending into the background),
+  --hairline and --ink-dim both brightened (borders and secondary text
+  were low-contrast enough to look "dull" against near-black), and the
+  accent/action/alarm hues nudged brighter for more pop. Same deep-navy
+  + cyan-glow direction as before, just with more separation between
+  layers.
 */
 
 :root {
-  --bg: #070a12;
-  --panel: #0d1220;
-  --panel-2: #0a0e1a;
-  --hairline: #1b2438;
-  --ink: #e7ecf5;
-  --ink-dim: #6b7793;
-  --accent: #3fa9ff;
-  --accent-2: #7cd4ff;
-  --action: #e8a33d;
-  --alarm: #ff5c5c;
+  --bg: #05070d;
+  --panel: #111a33;
+  --panel-2: #0a0f1e;
+  --hairline: #2a3a63;
+  --ink: #f3f6fc;
+  --ink-dim: #97a4c9;
+  --accent: #4db2ff;
+  --accent-2: #93e0ff;
+  --action: #f2ac48;
+  --alarm: #ff6b6b;
   --sans: -apple-system, "Segoe UI", system-ui, sans-serif;
   --mono: ui-monospace, "Cascadia Code", "Consolas", "SFMono-Regular", Menlo, monospace;
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* ---------- Scrollbars ----------
+   Milestone 14 — Electron/Chromium supports ::-webkit-scrollbar; themed
+   to match the dark palette instead of the default white-and-gray OS
+   scrollbar, which stood out against everything else here. Applies
+   everywhere scrolling happens (Session Log, the right column, Settings
+   body, etc.) rather than needing a rule per scrollable element. */
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--hairline);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-dim);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 html,
@@ -57,6 +96,128 @@ body {
 body {
   display: flex;
   flex-direction: column;
+  /* Room for the collapsed sidebar rail - kept in sync with
+     .sidebar's own collapsed width below. Expanding the sidebar
+     (body.sidebar-expanded) widens this to match. */
+  padding-left: 60px;
+  transition: padding-left 160ms ease;
+}
+
+body.sidebar-expanded {
+  padding-left: 200px;
+}
+
+/* ---------- Sidebar (Milestone 14 shell) ----------
+   Fixed-position rail so it doesn't participate in the topbar/.grid
+   flex flow - body's padding-left above reserves its width instead.
+   Collapsed by default (icon-only); renderer.js toggles both this
+   class and body.sidebar-expanded together on click, so the rail
+   width and the content's left margin never drift out of sync. */
+
+.sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 60px;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-right: 1px solid var(--hairline);
+  padding: 12px 0;
+  overflow: hidden;
+  z-index: 40;
+  transition: width 160ms ease;
+}
+
+.sidebar.expanded {
+  width: 200px;
+}
+
+.sidebar-toggle {
+  background: transparent;
+  border: none;
+  color: var(--ink-dim);
+  font-size: 16px;
+  cursor: pointer;
+  width: 100%;
+  padding: 8px 0;
+  margin-bottom: 8px;
+  flex: 0 0 auto;
+}
+
+.sidebar-toggle:hover {
+  color: var(--ink);
+}
+
+.sidebar-nav {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* A hairline + top margin separates the two real destinations above
+   from the placeholder future ones below, rather than one undifferentiated
+   list where a working link and a dead one look the same. */
+.sidebar-nav-future {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--hairline);
+}
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 18px;
+  cursor: pointer;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.sidebar-item:not(.disabled):hover {
+  color: var(--ink);
+  background: var(--panel-2);
+}
+
+.sidebar-item.active {
+  color: var(--accent-2);
+}
+
+.sidebar-item.disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.sidebar-icon {
+  flex: 0 0 auto;
+  width: 18px;
+  text-align: center;
+  font-size: 14px;
+}
+
+.sidebar-label {
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-soon {
+  margin-left: auto;
+  font-size: 9px;
+  color: var(--ink-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  flex: 0 0 auto;
+}
+
+/* Labels/tags only make sense once the rail is wide enough to hold
+   them - hidden while collapsed rather than truncated to nothing. */
+.sidebar:not(.expanded) .sidebar-label,
+.sidebar:not(.expanded) .sidebar-soon {
+  display: none;
 }
 
 /* ---------- Top bar ---------- */
@@ -145,9 +306,14 @@ body {
   flex: 0 0 auto;
 }
 
+/* Milestone 14: "shorten to a compact placeholder-style card — the full
+   detailed log view is what the future Memory nav destination is for."
+   No longer grows to fill the column (was flex: 1 1 auto); capped at a
+   fixed height instead, with its own scroll for anything past that. */
 .card-grow {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   min-height: 0;
+  max-height: 220px;
   display: flex;
   flex-direction: column;
 }
@@ -228,6 +394,14 @@ body {
   display: flex;
   flex-direction: column;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+/* Milestone 14 — the Clear-log confirm is a short message, not a whole
+   settings form, so it doesn't need the full modal width. Padding and
+   spacing come from the shared .modal-header/.modal-note/.modal-footer
+   rules already, same as the Settings modal. */
+.modal-confirm {
+  width: min(360px, 92vw);
 }
 
 .modal-header {
@@ -420,6 +594,33 @@ body {
   cursor: default;
 }
 
+/* Milestone 14 — mic icon, same trigger as the F9 hotkey. Outlined
+   rather than filled like Send, so it doesn't read as a second submit
+   button; pulses via .listening the same way the orb does while a
+   voice turn set off from here is actually recording. */
+.mic-btn {
+  background: transparent;
+  border: 1px solid var(--hairline);
+  color: var(--ink-dim);
+  font-size: 19px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mic-btn:hover {
+  color: var(--ink);
+  border-color: var(--accent);
+}
+
+.mic-btn.listening {
+  color: var(--accent-2);
+  border-color: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+  animation: pulse-mark 1s ease-in-out infinite;
+}
+
 /* ---------- Output ---------- */
 
 .output-box {
@@ -428,6 +629,8 @@ body {
   border-radius: 8px;
   padding: 12px;
   min-height: 64px;
+  max-height: 160px;
+  overflow-y: auto;
   font-size: 13px;
   line-height: 1.5;
 }
@@ -483,6 +686,105 @@ body {
   font-size: 11.5px;
   color: var(--ink-dim);
   text-align: center;
+  min-height: 1em;
+}
+
+/* Milestone 14: camera defaults off, on request only. */
+
+.camera-state-tag {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  color: var(--ink-dim);
+  border: 1px solid var(--hairline);
+  border-radius: 5px;
+  padding: 2px 7px;
+}
+
+.camera-state-tag.on {
+  color: var(--accent-2);
+  border-color: var(--accent);
+}
+
+.camera-off-panel {
+  aspect-ratio: 4 / 3;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--panel-2);
+  border: 1px dashed var(--hairline);
+  border-radius: 8px;
+  text-align: center;
+  padding: 16px;
+}
+
+.camera-on-btn {
+  background: var(--accent);
+  border: none;
+  color: #05121f;
+  font-weight: 600;
+  font-size: 12.5px;
+  border-radius: 7px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-family: var(--sans);
+}
+
+.camera-on-btn:hover {
+  background: var(--accent-2);
+}
+
+.camera-on-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.camera-off-note {
+  margin: 0;
+  font-size: 11px;
+  color: var(--ink-dim);
+  max-width: 220px;
+}
+
+.camera-controls {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.camera-toggle-btn {
+  flex: 1 1 auto;
+  background: transparent;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  color: var(--ink-dim);
+  font-size: 11px;
+  padding: 6px 8px;
+  cursor: pointer;
+  font-family: var(--sans);
+}
+
+.camera-toggle-btn:hover {
+  color: var(--ink);
+  border-color: var(--accent);
+}
+
+.camera-toggle-btn[aria-pressed="true"] {
+  color: var(--accent-2);
+  border-color: var(--accent);
+}
+
+.camera-toggle-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.camera-off-btn:hover {
+  color: var(--alarm);
+  border-color: var(--alarm);
 }
 
 .orb-stage {
@@ -803,6 +1105,25 @@ body {
   word-break: break-word;
 }
 
+/* Milestone 14 — points at the future Memory nav destination rather
+   than implying this compact card is the whole history. */
+.log-footer-note {
+  flex: 0 0 auto;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--hairline);
+  font-size: 10.5px;
+  color: var(--ink-dim);
+  text-align: center;
+}
+
+.log-footer-tag {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-left: 4px;
+}
+
 /* ---------- Coming soon ---------- */
 
 .soon-list {
@@ -830,6 +1151,76 @@ body {
   color: var(--ink-dim);
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+/* ---------- Placeholder cards (Milestone 14) ----------
+   Reuses .soon-tag for the "Not built yet" label so it stays visually
+   identical to the COMING SOON card's own tagging. */
+
+.placeholder-card {
+  opacity: 0.85;
+}
+
+.placeholder-visual {
+  aspect-ratio: 3 / 1.3;
+  border: 1px dashed var(--hairline);
+  border-radius: 8px;
+  background: var(--panel-2);
+  margin: 6px 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+/* A static dot grid - decorative only, not a rendering of real weights
+   or activations (see the card's own note). */
+.placeholder-nodes {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 16px;
+  padding: 14px 20px;
+}
+
+.placeholder-nodes span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink-dim);
+  opacity: 0.55;
+  justify-self: center;
+}
+
+/* A flat line at zero, not fabricated bars — honestly "nothing recorded
+   yet" rather than realistic-looking fake activity. */
+.placeholder-chart {
+  position: relative;
+  padding-top: 18px;
+}
+
+.placeholder-chart-flatline {
+  width: 82%;
+  height: 1px;
+  background: var(--hairline);
+  position: relative;
+}
+
+.placeholder-chart-flatline::after {
+  content: "No data yet";
+  position: absolute;
+  top: -18px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.placeholder-note {
+  margin: 0;
+  font-size: 10.5px;
+  color: var(--ink-dim);
+  line-height: 1.4;
 }
 
 @media (prefers-reduced-motion: reduce) {

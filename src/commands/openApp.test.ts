@@ -33,26 +33,25 @@ describe("tryHandleOpenApp", () => {
     expect(mockLaunch).toHaveBeenCalledWith("notepad.exe");
   });
 
-  it("passes launch args through for an app configured as {path, args} (chrome's debug-port flag)", async () => {
-    // chrome is real config/commands.json content, not a fixture -
-    // confirms the {path, args} shape (added for browserAutomation.ts's
-    // CDP attach) actually reaches launch() with both parts, not just
-    // the path.
+  it("launches chrome as a plain command, same as any other app", async () => {
+    // chrome used to be configured as {path, args} specifically to add
+    // --remote-debugging-port for browserAutomation.ts's old CDP-attach
+    // model. That's gone — browserAutomation.ts now launches its own
+    // dedicated Chrome profile directly via Playwright, so "open chrome"
+    // (the user's everyday Chrome) is back to a plain path with no
+    // special flags, same as every other app in commands.json.
     const result = await tryHandleOpenApp("open chrome");
     expect(result).toBe("Opening chrome.");
-    expect(mockLaunch).toHaveBeenCalledWith(
-      "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-      expect.arrayContaining(["--remote-debugging-port=9222"])
-    );
+    expect(mockLaunch).toHaveBeenCalledWith("C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe");
   });
 
   it("tolerates real conversational lead-ins instead of missing the fast path (real-machine regression)", async () => {
     // "Okay, so open Chrome" was the exact phrase that missed the old
     // please-only pattern on the real machine and fell through to the
     // LLM, which then picked the wrong tool entirely (browse, since
-    // chrome isn't a browsable site) - meaning Chrome never launched with
-    // the debug flag browserAutomation.ts needs. This is the deterministic
-    // fix: catch it here so it never reaches the LLM's judgment at all.
+    // chrome isn't a browsable site) instead of actually opening Chrome.
+    // This is the deterministic fix: catch it here so it never reaches
+    // the LLM's judgment at all.
     for (const phrase of ["okay so open chrome", "alright, open chrome", "can you open chrome", "well open chrome"]) {
       mockLaunch.mockClear();
       const result = await tryHandleOpenApp(phrase);

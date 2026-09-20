@@ -81,6 +81,11 @@ export type RouteInfo =
 
 export interface EngineEvents {
   busy: () => void; // trigger fired while a previous request was still running
+  // Milestone 14 bug fix: fires when typed text is accepted while busy
+  // and held to run once the current request finishes (see
+  // ProxyEngine.pendingText's docs) — the dashboard uses this to show
+  // "queued" instead of implying the text was dropped.
+  queued: (text: string) => void;
   // Milestone 8: no fixed duration anymore, so there's no "seconds" to
   // report up front — maxMs is the hard safety cap (recording stops
   // regardless past this point), included so the UI can say something
@@ -132,6 +137,15 @@ export declare interface ProxyEngine {
 
 export class ProxyEngine extends EventEmitter {
   private busy = false;
+  // Milestone 14 bug fix: typed text submitted while busy used to just
+  // vanish (runWithText() emitted "busy" and returned, dropping it on
+  // the floor). Single slot, not a real queue — a second submission
+  // while one is already pending replaces it rather than stacking, since
+  // stacking arbitrary typed requests behind each other is its own can
+  // of worms (ordering, a stale first message firing minutes later) that
+  // wasn't asked for. Cleared by cancel() too, so an explicit stop
+  // really means stop — nothing queued fires afterward on its own.
+  private pendingText: string | null = null;
   private initialized = false;
   // One instance, reused across requests — not recreated per call —
   // so cancel() always has the actually-in-flight run to act on. Its
@@ -200,6 +214,7 @@ export class ProxyEngine extends EventEmitter {
    */
   cancel(): void {
     this.orchestrator.cancel();
+    this.pendingText = null;
   }
 
   /** True while a request is in flight — callers can use this to ignore/queue triggers. */
@@ -252,16 +267,25 @@ export class ProxyEngine extends EventEmitter {
 
   /** Same pipeline as runOnce(), but for text that's already known (dashboard Input box) — skips recording/STT. */
   async runWithText(text: string): Promise<void> {
-    if (this.busy) {
-      this.emit("busy");
-      return;
-    }
     const trimmed = text.trim();
     if (!trimmed) {
       this.emit("no-speech");
       return;
     }
+    if (this.busy) {
+      // Queued rather than dropped — see pendingText's docs above. Still
+      // emits "busy" too (unchanged) so anything already listening for
+      // "a trigger arrived while busy" (e.g. the dashboard's status log
+      // line) keeps working exactly as before; "queued" is additive.
+      this.pendingText = trimmed;
+      this.emit("busy");
+      this.emit("queued", trimmed);
+      return;
+    }
+    await this.runTextNow(trimmed);
+  }
 
+  private async runTextNow(trimmed: string): Promise<void> {
     this.busy = true;
     try {
       this.emit("transcribed", trimmed);
@@ -271,6 +295,14 @@ export class ProxyEngine extends EventEmitter {
     } finally {
       this.busy = false;
       this.emit("idle");
+      // The in-flight request has fully finished (including its "idle")
+      // before the queued one starts — never interrupts what was
+      // already running, same requirement as the voice/hotkey path.
+      if (this.pendingText !== null) {
+        const next = this.pendingText;
+        this.pendingText = null;
+        void this.runTextNow(next);
+      }
     }
   }
 

@@ -76,6 +76,8 @@ function send(channel: string, payload?: unknown) {
 // out of sync with what the engine actually does.
 function wireEngineEvents() {
   engine.on("busy", () => send("proxy:busy"));
+  // Milestone 14 bug fix — see engine.ts's pendingText docs.
+  engine.on("queued", (text: string) => send("proxy:queued", text));
   engine.on("listening", (info) => send("proxy:listening", info));
   engine.on("speech-start", () => send("proxy:speech-start"));
   engine.on("transcribing", () => send("proxy:transcribing"));
@@ -108,6 +110,18 @@ function wireEngineEvents() {
 // calls "a minimal cancellation path." Everything else typed while busy
 // still just disappears — that's the known, already-documented
 // Milestone 14 limitation, unchanged here.
+// Milestone 9 step 6, extracted for Milestone 14: both the global hotkey
+// and the dashboard's new mic-icon button need to trigger the exact same
+// "start listening, or cancel if already busy" action — pulled into one
+// function so there's one implementation, not two that could drift.
+function triggerVoiceOrCancel() {
+  if (engine.isBusy()) {
+    engine.cancel();
+  } else {
+    engine.runOnce();
+  }
+}
+
 function wireRendererCommands() {
   ipcMain.on("proxy:submit-text", (_event, text) => {
     if (typeof text !== "string") return;
@@ -135,6 +149,14 @@ function wireRendererCommands() {
   // only needs to wipe the persisted copy; there's nothing to send back.
   ipcMain.on("proxy:clear-log", () => {
     void clearLogHistory();
+  });
+
+  // Milestone 14 — mic icon inside the Input box: same trigger as the
+  // F9 hotkey (see triggerVoiceOrCancel below), just reachable without a
+  // keyboard. Not a second implementation of the busy/cancel logic —
+  // both call the same function.
+  ipcMain.on("proxy:trigger-voice", () => {
+    triggerVoiceOrCancel();
   });
 
   // Settings modal (Milestone 13, second half). First request-response
@@ -233,11 +255,7 @@ app.whenReady().then(async () => {
     // Milestone 9 step 6: pressing the hotkey again while busy cancels
     // the current run instead of the old silent no-op (runOnce() itself
     // still just emits "busy" and returns for a trigger it can't act on).
-    if (engine.isBusy()) {
-      engine.cancel();
-    } else {
-      engine.runOnce();
-    }
+    triggerVoiceOrCancel();
   });
 
   if (!registered) {

@@ -7,6 +7,59 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+  <!-- Milestone 14: sidebar shell. Dashboard and Settings are real,
+       working destinations (Settings just opens the same modal the
+       topbar button already does); the rest are genuine future
+       destinations named in the Milestone 14 plan, shown honestly as
+       "Soon" rather than as working links to nothing - same principle
+       as the COMING SOON card below. Collapsed (icon rail) by default;
+       renderer.js's #sidebarToggle click handler expands/collapses it. -->
+  <nav class="sidebar" id="sidebar" aria-label="Navigation">
+    <button id="sidebarToggle" class="sidebar-toggle" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <ul class="sidebar-nav">
+      <li class="sidebar-item active" aria-current="page">
+        <span class="sidebar-icon" aria-hidden="true">▣</span>
+        <span class="sidebar-label">Dashboard</span>
+      </li>
+      <li class="sidebar-item" id="sidebarSettingsItem" role="button" tabindex="0">
+        <span class="sidebar-icon" aria-hidden="true">⚙</span>
+        <span class="sidebar-label">Settings</span>
+      </li>
+    </ul>
+    <ul class="sidebar-nav sidebar-nav-future">
+      <li class="sidebar-item disabled">
+        <span class="sidebar-icon" aria-hidden="true">•</span>
+        <span class="sidebar-label">Camera</span>
+        <span class="sidebar-soon">Soon</span>
+      </li>
+      <li class="sidebar-item disabled">
+        <span class="sidebar-icon" aria-hidden="true">•</span>
+        <span class="sidebar-label">Chat interface</span>
+        <span class="sidebar-soon">Soon</span>
+      </li>
+      <li class="sidebar-item disabled">
+        <span class="sidebar-icon" aria-hidden="true">•</span>
+        <span class="sidebar-label">Memory</span>
+        <span class="sidebar-soon">Soon</span>
+      </li>
+      <li class="sidebar-item disabled">
+        <span class="sidebar-icon" aria-hidden="true">•</span>
+        <span class="sidebar-label">Tools</span>
+        <span class="sidebar-soon">Soon</span>
+      </li>
+      <li class="sidebar-item disabled">
+        <span class="sidebar-icon" aria-hidden="true">•</span>
+        <span class="sidebar-label">Maps</span>
+        <span class="sidebar-soon">Soon</span>
+      </li>
+      <li class="sidebar-item disabled">
+        <span class="sidebar-icon" aria-hidden="true">•</span>
+        <span class="sidebar-label">Devices</span>
+        <span class="sidebar-soon">Soon</span>
+      </li>
+    </ul>
+  </nav>
+
   <header class="topbar">
     <div class="brand">
       <span class="brand-dot" id="statusDot"></span>
@@ -26,7 +79,8 @@
       <div class="card">
         <div class="card-title">INPUT</div>
         <form id="inputForm" class="input-row">
-          <input id="inputText" type="text" placeholder="Type a command, or press F9 to talk…" autocomplete="off" maxlength="1000" />
+          <input id="inputText" type="text" placeholder="Type a command ( / to focus), or press F9 to talk…" autocomplete="off" maxlength="1000" />
+          <button type="button" id="micBtn" class="mic-btn" aria-label="Talk (same as F9)" aria-pressed="false" title="Talk (same as F9)">🎙︎</button>
           <button type="submit" id="inputSend" aria-label="Send">➤</button>
         </form>
       </div>
@@ -38,13 +92,44 @@
         </div>
       </div>
 
+      <!-- Off by default, on request only — no getUserMedia call happens
+           until #cameraOnBtn is clicked. This is a preview card; the
+           full-featured camera window is a future sidebar destination
+           (see the sidebar's "Camera" placeholder). -->
       <div class="card camera-card">
-        <div class="card-title">CAMERA</div>
-        <div class="camera-frame">
+        <div class="card-title-row">
+          <div class="card-title">CAMERA</div>
+          <span class="camera-state-tag" id="cameraStateTag">CAM OFF</span>
+        </div>
+        <div class="camera-off-panel" id="cameraOffPanel">
+          <button id="cameraOnBtn" class="camera-on-btn">Turn on camera</button>
+          <p class="camera-off-note">Preview only — nothing starts until you turn it on.</p>
+        </div>
+        <div class="camera-frame hidden" id="cameraFrame">
           <video id="cameraVideo" autoplay muted playsinline></video>
           <canvas id="cameraOverlay"></canvas>
         </div>
-        <div class="camera-status" id="cameraStatus">Starting camera…</div>
+        <div class="camera-controls hidden" id="cameraControls">
+          <button id="handTrackingToggle" class="camera-toggle-btn" aria-pressed="false">Hand tracking: Off</button>
+          <button id="cameraOffBtn" class="camera-toggle-btn camera-off-btn">Turn off camera</button>
+        </div>
+        <div class="camera-status" id="cameraStatus"></div>
+      </div>
+
+      <!-- Moved here on request — the center-column placement got cut
+           off below the fold with no way to scroll to it (col-center
+           doesn't scroll like col-left/col-right do). Back to the
+           original small size to match its new neighbors. -->
+      <div class="card placeholder-card">
+        <div class="card-title-row">
+          <div class="card-title">NEURAL NETWORK</div>
+          <span class="soon-tag">Not built yet</span>
+        </div>
+        <div class="placeholder-visual placeholder-nodes" aria-hidden="true">
+          <span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <p class="placeholder-note">Decorative for now — a literal view into the model's internals isn't something this could show truthfully.</p>
       </div>
     </section>
 
@@ -92,6 +177,18 @@
         <div class="log" id="log" aria-live="polite">
           <p class="log-empty" id="logEmpty">Every step will show up here as it happens.</p>
         </div>
+        <div class="log-footer-note">Full history → Memory <span class="log-footer-tag">Soon</span></div>
+      </div>
+
+      <div class="card placeholder-card">
+        <div class="card-title-row">
+          <div class="card-title">ACTIVITY CHART</div>
+          <span class="soon-tag">Not built yet</span>
+        </div>
+        <div class="placeholder-visual placeholder-chart" aria-hidden="true">
+          <div class="placeholder-chart-flatline"></div>
+        </div>
+        <p class="placeholder-note">Will chart real request history once there's some to show.</p>
       </div>
 
       <div class="card">
@@ -114,6 +211,27 @@
     </section>
 
   </main>
+
+  <!-- Milestone 14 fix — replaces the native window.confirm() the Clear
+       button used to call. Electron's synchronous confirm() dialog was
+       leaving the renderer's input box unable to take focus afterward
+       (a known class of Electron/Chromium issue with blocking native
+       dialogs) - an in-app modal, already used for Settings, sidesteps
+       it entirely rather than working around the symptom. -->
+  <div class="modal-overlay hidden" id="confirmOverlay">
+    <div class="modal modal-confirm" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+      <div class="modal-header">
+        <div class="modal-title" id="confirmTitle">CONFIRM</div>
+      </div>
+      <p class="modal-note" id="confirmMessage"></p>
+      <div class="modal-footer">
+        <div class="modal-footer-right">
+          <button class="modal-btn modal-btn-secondary" id="confirmCancelBtn">Cancel</button>
+          <button class="modal-btn modal-btn-primary" id="confirmOkBtn">OK</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- Milestone 13, second half. Hidden by default; renderer.js toggles
        the "hidden" class and fills #settingsBody from its own
