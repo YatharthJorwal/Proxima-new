@@ -1719,7 +1719,7 @@ for (const field of SETTINGS_FIELDS) {
     row.appendChild(select);
     settingsBody.appendChild(row);
     settingsInputs[field.key] = select;
-    return;
+    continue;
   }
   input.type = field.type;
   input.id = `setting-${field.key}`;
