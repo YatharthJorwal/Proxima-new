@@ -234,4 +234,5 @@ describe("Orchestrator", () => {
 
     expect(tiers).toEqual(["fast", "smart"]);
   });
+
 });

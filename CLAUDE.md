@@ -63,45 +63,30 @@ webcam hand-tracking slice. Full stack table, diagrams, and directory
 layout: `docs/architecture.md`.
 
 ## Current status (short version)
-**Read `handoff.md` first if it exists — it's the latest session's handoff
-note and takes priority over anything below if they conflict.** This
-section is the durable summary; `handoff.md` is the "what just happened"
-layer on top of it, meant to get folded back into this file and
-`docs/project-status.md` once it's been read, not to live forever.
+Read `docs/project-status.md` for milestone status and the remaining
+external setup and real-machine gates. The short-lived debugging handoff
+has been folded into that file and `docs/decisions.md`.
 
-Milestones 1–9 (audio pipeline, STT, hardcoded commands, TTS, LLM intent
-routing, dashboard, first CV slice, VAD, task orchestration) are built and
-confirmed working on the user's real machine. Milestone 10 (agentic
-capabilities) is in progress: Parts A and B (file tools; run_script)
-confirmed working; Part C (Gmail) still has the pending .env/setup issue,
-unresolved; Part D (memory) confirmed working, with two real bugs found
-via real-machine testing and fixed (an empty-reply fallback, and a
-hallucination traced to a bad example string in a tool description); Part
-E (browser automation, Playwright/CDP) is BUILT but **not yet working end
-to end** — see `handoff.md` for the current debugging state, which is
-substantial and unresolved as of this note. Gesture-to-action wiring (the
-other original Part D item) still not started/scoped. Milestone 13
-(settings + persistent session log) is fully done and confirmed, including
-a "Clear" button on the session log. Milestone 19 Part A (system usage
-query tool) is also confirmed working.
+Milestones 1–9 are recorded as confirmed on the user's Windows machine.
+Milestone 10 is partly complete: file/script tools, memory, and stock
+quotes are built; Gmail awaits OAuth setup and stock quotes need an
+Alpha Vantage key; browser automation is deferred by the user's
+choice to keep their everyday Chrome profile; pinch-to-voice is wired and
+needs camera calibration. The map requests location only after an in-app
+action, and the user approved online map tiles. Outbound phone calling is
+implemented; the user will configure its provider later. Other milestones
+include live maps/news/device/monitor panels, an authenticated local
+iPhone webhook, optional whisper.cpp STT, double-clap activation, and a
+CAD editor with numeric dimensions and bounded mesh diagnostics. CPU STT
+inference runs in a separate utility/child process. The installer and hardware-dependent integrations
+still need their stated verification gates.
 
-A significant architecture investigation happened this session: adopting
-Nous Research's "Hermes Agent" (a full third-party agentic runtime) was
-researched and deliberately shelved — tested directly against qwen3.5:9b
-on this machine's 12GB VRAM and found unreliable, corroborated by an
-identical failure reported in Hermes Agent's own GitHub issues at the same
-VRAM budget. Full reasoning: `docs/decisions.md`. The takeaway that matters
-for future model choices: this machine's 9B-class model genuinely
-struggles with heavy multi-tool agentic prompting, not just Hermes Agent's
-specifically — the "comfortably runs 7-8B" hardware note above was
-written before this was tested for real, and should be read with that in
-mind, not as settled fact for agentic workloads specifically (single-tool-
-call, low-composition tasks still work fine at this size).
+The Hermes Agent experiment was deliberately shelved after unreliable
+multi-tool behavior with qwen3.5:9b at the available VRAM budget. See
+`docs/decisions.md` for the evidence and constraints relevant to future
+model choices.
 
 ## Documentation
-- `handoff.md` (if present) — the latest session's handoff note: what was
-  just debugged, what's still broken, what decision is pending. Read this
-  FIRST, before the four files below — it's the current front door.
 - `docs/architecture.md` — the pipeline, stack table, directory structure,
   and how each *built* subsystem currently works (VAD, CV/MediaPipe,
   Electron dashboard internals, tool registry, orchestrator shape).

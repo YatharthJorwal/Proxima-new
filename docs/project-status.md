@@ -36,46 +36,44 @@ Both are now resolved.
 4. ~~TTS~~ — done (Piper default, ElevenLabs optional)
 5. ~~LLM intent layer~~ — done (single-shot tool-calling router)
 6. ~~Dashboard (Electron)~~ — done, confirmed working on the user's machine
-7. Computer vision / gesture input — first slice (detection + visualization
-   only) done, confirmed working; gesture-to-action wiring deferred to
-   Milestone 10
+7. Computer vision / gesture input — hand tracking confirmed working;
+   optional pinch-to-voice trigger built, awaiting camera calibration
 8. ~~Voice activity detection (VAD)~~ — done, confirmed working
 9. ~~Task orchestration / multi-step tool calling~~ — **done, confirmed**
    (all 7 steps, including step 7's real-machine test cases), see
    detailed status below
-10. Agentic capabilities (file tools, code execution, gesture wiring,
-    external data, memory) as orchestrator tools — **in progress**, see
-    detailed status below. Parts A and B (file tools, code execution)
-    confirmed working; Part C (external data) started (Gmail slice
-    built, not yet real-machine tested — needs your OAuth setup + a real
-    test); Part D (memory) started (automatic-capture slice built, not
-    yet real-machine tested; gesture-to-action wiring not started).
-11. Maps / location awareness — not started
-12. Bluetooth / connected devices — not started
-13. Settings panel + persistent dashboard session history — **in
-    progress**: session log persistence built, not yet real-machine
-    tested; settings UI not started
-14. Dashboard visual refresh — not started, planning stage (full spec
-    below)
-15. STT upgrade (Distil-Large-v3.5 + real GPU acceleration) — investigation
-    done, decision pending your go-ahead (full findings: `decisions.md`)
-16. iPhone integration (messages, remote control) — not started, real
-    feasibility researched (full findings: `decisions.md`) — see the
-    Milestone 16 section below for what's actually worth building first
-17. Packaging (Windows installer + auto-launch on startup) — not started,
-    genuinely easy when it happens
-18. Alternative activation: double-clap trigger — not started
+10. Agentic capabilities — **in progress**. Parts A, B, and D's memory
+    slice are confirmed working; Gmail and stock quotes are built and need
+    credentials/live-service confirmation;
+    browser automation is deferred by user choice; pinch-to-voice trigger
+    is implemented and awaits real-camera confirmation. See detailed status below.
+11. Maps / location awareness — opt-in map tile view built; awaiting Windows confirmation
+12. Bluetooth / connected devices — initial inventory tile built; awaiting
+    Windows confirmation
+13. Settings panel + persistent dashboard session history — **done,
+    confirmed** (session history and settings UI)
+14. Dashboard visual refresh — shell and live monitor/device panels built;
+    awaiting clean Electron launch and real-machine UI confirmation
+15. STT upgrade (Distil-Large-v3.5 + real GPU acceleration) — CUDA
+    whisper.cpp runtime and weights installed; inference confirmation remains
+16. iPhone integration — authenticated SMS webhook and inbox query built;
+    Shortcuts/tunnel setup and real-device confirmation remain
+17. Packaging — opt-in startup setting implemented and Windows NSIS
+    installer built; packaged install/launch confirmation remains
+18. Alternative activation: double-clap detector implemented as explicit
+    opt-in; real-device false-positive/sensitivity calibration remains
 19. System monitor (Task Manager tile + Proxy-queryable resource usage) —
-    Part A (the tool) done, confirmed working; Part B (the sidebar tile)
-    blocked on Milestone 14
-20. 3D modeling assistant ("a personalized Blender") — not started, the
-    last major planned undertaking, phased (see below) — by far the
+    Part A done and confirmed; Part B built, awaiting Windows confirmation
+20. 3D modeling assistant — STL/OBJ import, primitive editor, numeric
+    dimensions, transform gizmos, natural-language assembly/transform
+    edits, rounded-box edits, union/subtraction, bounded topology diagnostics, preview
+    description, and STL export built; advanced CAD features and real-machine
+    WebGL confirmation remain
     biggest item on this roadmap
-21. Personalized news window — not started, one of the more
-    straightforward items here
-22. Proxy can call your phone — not started, real feasibility researched
-    — genuinely different in kind from everything above (needs a cloud
-    telephony provider, real ongoing cost, breaks local-only — see below)
+21. Personalized news panel/tool — RSS fetch, optional interest filter,
+    and local-model summarization built; awaiting live feed confirmation
+22. Proxy can call your phone — outbound spoken-message slice built;
+    provider setup and real-machine confirmation remain
 
 ## Milestones 1–5 — complete
 
@@ -154,10 +152,11 @@ limitation from Milestone 3 as a side effect.
 ## Milestone 7 — Computer vision / hand tracking — first slice confirmed
 
 Webcam feed + MediaPipe `HandLandmarker`, detecting and drawing hand
-landmarks live in the dashboard's Camera card. Deliberately scoped to
-detection + visualization only — no gesture-to-action wiring yet (folded
-into Milestone 10, to be built as an orchestrator tool rather than a
-bespoke integration).
+landmarks live in the dashboard's Camera card. A user-enabled pinch
+trigger is wired to the same start/cancel voice action as F9; it is off
+until the user turns on the camera, hand tracking, and Pinch trigger. The
+pinch is edge-triggered and rate-limited. Real-camera calibration is
+required before calling it confirmed.
 
 - **Confirmed working on the user's machine**: camera permission prompt,
   WASM loading, and hand-tracking are all live and accurate — "hand
@@ -339,9 +338,9 @@ timeout-and-kill test. Confirmed on the real machine: write-then-run,
 confirm, deny, and the drop-on-unrelated-utterance path all worked as
 designed.
 
-**Part C — external data (stock prices, Gmail) — Gmail slice built, not
-yet real-machine tested; everything else in this part still just
-researched, not started.** Gmail was picked as the first slice to
+**Part C — external data (stock prices, Gmail) — Gmail and basic stock
+quote slices built; external credentials and live-service confirmation
+remain.** Gmail was picked as the first slice to
 actually build (over Groww — see below, no portfolio exists yet to
 connect to): `get_emails`, a read-only query tool (`gmail.readonly`
 OAuth scope — can't send, delete, or modify anything, which is what
@@ -354,9 +353,7 @@ for real — confirm you've completed that and gotten a real answer back
 done. 8 unit tests (`gmail.test.ts`) cover header-parsing and the
 summary logic against a mocked Gmail client.
 
-Everything else researched for this part (see `decisions.md` for the
-full findings — searched rather than assumed, since this matters for
-what's actually buildable):
+Further market-data research (see `decisions.md` for source findings):
 - **Groww** — genuinely straightforward. Groww now has an official
   Trading API (₹499/month subscription) covering portfolio/holdings,
   live market data, and historical data — exactly the shape needed for
@@ -366,22 +363,27 @@ what's actually buildable):
   Screener.in on your behalf for a small per-request fee — usable, but
   worth knowing it's an unofficial middleman, not Screener.in itself, and
   could break if they change their site.
-- **Generic stock quotes** (for symbols outside Groww holdings) — any of
-  the standard free-tier market data APIs (Alpha Vantage, Finnhub, etc.)
-  would cover this cleanly, same shape as the above.
-- **Gmail** — the easy one, and the one built (see above). Official
-  Gmail API, standard OAuth2, reading and searching messages is exactly
-  what it's designed for. No caveats.
+- **Generic stock quotes** — implemented with Alpha Vantage's official
+  quote endpoint (details below), avoiding scraping.
 - **Apple Stocks app** specifically — not a real integration target.
   Apple doesn't expose the Stocks app to third parties at all; "stock
   data on the PC" means a real market-data API (above), not pulling from
   the iPhone's own Stocks app.
 
-Recommendation, updated now that Gmail is built: prove the pattern held
-(confirm the real-machine test above), then Groww is the natural next
-source once there's an actual portfolio to point it at — no Groww
-portfolio exists yet, so that piece stays exactly where it is in the
-roadmap until there's a real one.
+Groww remains the natural next portfolio integration if there is a real
+Groww portfolio to connect. It has a recurring subscription cost, so it
+is not configured or called without the user choosing that provider.
+
+The independent stock-quote slice uses Alpha Vantage's [`GLOBAL_QUOTE`
+endpoint](https://www.alphavantage.co/documentation/) for one symbol at a
+time. It caches a symbol for five minutes,
+labels the default response as end-of-day, and does not claim real-time
+data or make investment recommendations. The quote response used here
+does not include currency, which Proxy says explicitly. The user must add
+an API key in Settings; Alpha Vantage's [free service](https://www.alphavantage.co/support/)
+currently allows 25 requests per day, while real-time and 15-minute-delayed
+US quotes require a paid plan. The provider receives the ticker and API key. This slice
+still needs a configured key and live-response confirmation.
 
 **Part D — memory — confirmed on the real machine, two real bugs found and fixed.**
 Scoped in conversation first (see `decisions.md` for the full design
@@ -391,10 +393,11 @@ knowingly): facts, preferences, and project context are captured
 interaction after the user has already heard their reply and decides if
 anything durable is worth keeping, storing it in a flat capped local
 JSON file (`~/.proxima/memory.json`, `PROXY_MEMORY_FILE` overridable,
-30-entry cap, oldest pruned first). No manual `remember_fact`/
-`forget_fact` override in v1 — a bad automatic capture just sits in the
-list until pruned, a real known limitation, confirmed painfully in real
-use, not solved here. Recall happens through a `recall_facts` tool the
+30-entry cap, oldest pruned first). The Memory dashboard panel now lets
+the user review saved facts and clear the full store after confirmation.
+There are no individual edit/delete or manual `remember_fact`/
+`forget_fact` tools; a bad automatic capture remains until pruned or the
+full store is cleared. Recall happens through a `recall_facts` tool the
 model calls on demand (plain substring matching, no embeddings) —
 `resultInformsNextStep: true`, since a raw fact list is material for an
 answer, not the answer itself. 13+ unit tests (`core/memory.test.ts`,
@@ -414,14 +417,18 @@ say you did something a tool would be needed for) to cover memory
 specifically, since the model was also claiming to have "noted" or
 offering to "forget" facts with no write/delete tool to back either claim.
 
-**Part E — browser automation — done, confirmed working, real-machine
-tested via cursor-visible clicks.** Scoped through a full conversation
-(not defaulted on) after real-machine testing showed the actual limit
-wasn't "the model can't reason," it was "there's no tool for interacting
-with a webpage once it's open" (the concrete example: "play music by my
-mood" — `browse.ts` can open a search page, but nothing could click
-play). Three real decisions, asked rather than assumed, same posture as
-Part B's confirmation mechanism:
+**Part E — browser automation — deferred by user choice.** No real
+`browser_click` has succeeded. The user chose to keep the everyday
+profile and defer browser automation, so no isolated profile will be
+created. The failure is understood to involve Chrome's single-profile
+launch behavior: Chrome only applies `--remote-debugging-port` on a
+genuinely fresh process launch. The user's decision to defer automation is
+documented here and in `decisions.md`.
+The initial
+scope was agreed through a full
+conversation after real-machine testing showed the missing capability:
+interacting with a webpage once it is open (for example, clicking play
+after searching for music). Three original scope decisions were:
 
 1. **Drives the user's real Chrome profile**, not an isolated one — more
    useful (real logins, no separate auth needed), higher stakes if it
@@ -436,13 +443,15 @@ Part B's confirmation mechanism:
 
 Architecture: Chrome only allows one process per profile, so this
 ATTACHES via CDP (`chromium.connectOverCDP`, `playwright-core` — no
-bundled browser download needed) to an already-running Chrome rather
-than launching a competing instance. `config/commands.json`'s `chrome`
-entry now launches with `--remote-debugging-port=9222` (see `launch.ts`'s
-new optional `args` parameter, additive and backward-compatible with
-every existing plain-string app entry) so saying "open chrome" always
-sets this up correctly; if Chrome's already open without that flag,
-`connectOverCDP` fails and the tool says so honestly rather than hanging.
+bundled browser download needed) to Chrome using the user's real profile.
+`config/commands.json`'s `chrome` entry launches with
+`--remote-debugging-port=9222`; if Chrome is already open without that
+flag, Chrome can ignore the later launch request and CDP cannot connect.
+The current implementation explains that failure, but the shared-profile
+launch conflict is unresolved. A separate automation profile was
+proposed as a fix, but would start logged out and reverse the earlier
+choice to use the real profile. **Do not implement it until the user
+explicitly confirms that change.**
 The port number (9222) is duplicated between `commands.json` and
 `browserAutomation.ts` on purpose, not made configurable — a JSON config
 file can't read this file's constant or an env var, and the two having
@@ -479,9 +488,9 @@ shaped guess for text fields.
 entirely — there's no real Chrome in the sandbox — covering the
 confirmation gate (keyword-triggered, `may_commit`-triggered, confirm/
 deny/unclear resolution matching `runScript.ts`'s exact behavior) and
-honest-failure paths (unreachable Chrome, stale element ID). What's real-
-machine confirmed, not sandbox-testable: the actual cursor movement,
-click accuracy, and CDP attach against a real running Chrome.
+honest-failure paths (unreachable Chrome, stale element ID). The cursor
+movement, click accuracy, and CDP attach have not yet been confirmed end
+to end on the user's machine.
 
 Real-machine testing surfaced one more thing worth remembering: Chrome's
 `--remote-debugging-port` only applies on a genuinely fresh process
@@ -506,13 +515,17 @@ multi-step flow (navigate → type → click → click again) can burn most of
 that budget fast. Revisit if real testing shows it's cutting off
 legitimate tasks partway — not changed speculatively here.
 
-**Gesture-to-action wiring** (the other original Part D item, a
-Milestone 7 CV follow-up) — still not started, still not scoped.
-Distinct from the dashboard's session-log persistence in Milestone 13,
-which is just the UI log surviving a relaunch, not the LLM knowing
-anything.
+The current working tree also carries a TTS stop/cancellation fix awaiting
+real-machine confirmation. Browser automation code remains present but is
+not exposed to the model while the milestone is deferred.
 
-## Milestone 16 — iPhone integration (messages, remote control) — not started, real feasibility researched
+**Gesture-to-action wiring** (the other original Part D item) — an
+optional pinch trigger now invokes the voice trigger after the user turns
+on the camera, hand tracking, and the separate pinch-trigger control. It
+starts listening or cancels an active request; it does not launch apps or
+send messages. Sensitivity and false positives need real-camera testing.
+
+## Milestone 16 — iPhone integration — authenticated SMS receive path built
 
 Distinct from Milestone 10 Part C above: this is device/ecosystem
 integration (Apple's Shortcuts automation system, third-party bridge
@@ -549,23 +562,42 @@ apps), not "call a REST API." Feasibility varies a lot by piece — see
   else — that's a hard security boundary by design, not a gap waiting to
   be filled. Not worth revisiting unless Apple's own stance changes.
 
-Recommendation if this gets prioritized: the SMS-forward-to-webhook path
-is the one actually worth building first — real, documented, no ToS risk,
-and covers the "new message from a client" use case directly. Safari-open-
-via-Pushcut is a fun demo but low value on its own. WhatsApp and
-remote-unlock are not recommended pursuits, for the reasons above.
+The app now has an optional authenticated local webhook (`POST
+/api/iphone/sms`) and a `get_iphone_messages` tool. The listener starts
+only when `PROXY_IPHONE_WEBHOOK_TOKEN` is configured and binds to
+127.0.0.1 by default; it accepts only bounded JSON payloads with a valid
+Bearer token and stores the latest 100 messages locally. The user still
+needs to configure an iPhone Shortcut and an HTTPS tunnel/reachable
+endpoint. No firewall changes, tunnel, or phone automation were configured
+here. WhatsApp and remote unlock remain out of scope for the reasons above.
 
-## Milestone 11 — Maps / location awareness — not started
+## Milestone 11 — Maps / location awareness — opt-in map tile view built, awaiting Windows confirmation
 
-Ties to the dashboard's "Live map" coming-soon tile. Needs a real location
-source (Windows Location API, or an IP-geolocation fallback) before any map
-rendering is worth building.
+The user approved location access only after an explicit in-app action and
+online map tiles. The dashboard map now requests browser location only
+after “Enable location” is clicked, then renders the current area with
+OpenStreetMap raster tiles and visible attribution. Its public tile policy
+requires attribution, a stable identifiable app User-Agent, and cache use;
+the app supplies its identity and leaves normal browser caching on. No
+coordinates are queried at launch. The tile provider can infer the map area
+from requested tile URLs. Windows Location Services, Electron permission
+behavior, and tile rendering still require real-machine confirmation.
+There is no place search, route planning, or background tracking yet.
 
-## Milestone 12 — Bluetooth / connected devices — not started
+## Milestone 12 — Bluetooth / connected devices — initial inventory tile built
 
-Ties to the dashboard's "Connected devices" coming-soon tile. Needs real
-device enumeration (Windows Bluetooth/WinRT APIs, likely via a native Node
-addon) — real data or an honest empty state, never placeholder numbers.
+The dashboard polls Windows PnP for currently-present Bluetooth and audio
+endpoints and displays their names, device classes, and Windows status.
+The label says “detected now” because `Get-PnpDevice -PresentOnly` does
+not guarantee an active Bluetooth link or provide signal strength. The
+panel reports an honest unavailable state if the Windows query fails.
+This first slice has not yet been confirmed on the user's Windows machine.
+
+This is the first implementation slice of the Connected Devices card. It
+uses Windows PnP's `-PresentOnly` query for Bluetooth and audio endpoints,
+reports the actual device names/statuses, and uses an explicit unavailable
+or empty state. It is a presence inventory, not a signal-strength or
+protocol-link monitor. Real Windows confirmation remains outstanding.
 
 ## Milestone 13 — Settings panel + persistent dashboard session history — done, confirmed
 
@@ -579,7 +611,8 @@ anything about the user (that's Milestone 10).
 SESSION LOG card entry (`heard`/`routed`/`reply`/`status`/`error`) is now
 mirrored to a flat local JSON file (`~/.proxima/session-log.json`,
 `PROXY_SESSION_LOG_FILE` overridable, capped at 500 entries, oldest
-pruned) as it's rendered, and replayed on the next launch — with real
+pruned) through atomic same-directory writes and serialized appends as
+it's rendered, and replayed on the next launch — with real
 original timestamps, not "now" — separated from the new session's live
 entries by a plain divider. `main.ts` never formats anything itself; it
 mirrors the already-formatted `{kind, text}` pairs `renderer.js` already
@@ -600,9 +633,9 @@ how nearly every env var here is already read once at module load time —
 rearchitecting that everywhere for live reload was considered and
 rejected as solving a problem this app doesn't have yet.
 
-Settings are a modal overlay (button in the topbar), covering all 17
-known configuration values across four groups (Voice, Gmail, Assistant,
-Storage, Voice detection). Saved values live in a separate flat JSON file
+Settings are a modal overlay (button in the topbar), covering known
+configuration values across Voice, Gmail, Assistant, Storage, and feature
+groups added by later milestones. Saved values live in a separate flat JSON file
 (`~/.proxima/settings.json`, `PROXY_SETTINGS_FILE` overridable) layered
 OVER `.env` rather than rewriting `.env` directly — `.env` is a
 hand-edited file with the user's own comments and formatting, and a
@@ -610,7 +643,8 @@ programmatic rewrite that only knows about 17 specific keys risked
 mangling anything else in it. A blank field, saved, removes that key's
 override entirely (falls back to `.env`) rather than persisting an empty
 string — keeps `settings.json`'s content always exactly "what's filled
-in, minus the blanks."
+in, minus the blanks." Settings and memory also replace their JSON state
+atomically so an interrupted write does not leave a partial file.
 
 The one real subtlety, worth remembering if this ever seems to
 misbehave: `core/settings.ts` applies the saved file's contents to
@@ -629,7 +663,7 @@ feature-name tag made sense while that card was new; it doesn't add
 anything now that hand tracking has just been a normal, working part of
 the dashboard for a while.
 
-## Milestone 14 — Dashboard visual refresh — not started, planning stage
+## Milestone 14 — Dashboard visual refresh — implementation present, awaiting real-machine confirmation
 
 Triggered by the user sharing a reference image and a written wishlist.
 Note: the *palette* this reference image inspired is already in
@@ -637,58 +671,45 @@ Note: the *palette* this reference image inspired is already in
 the *execution* further toward the reference's polish/contrast/liveliness,
 plus several independently-scoped fixes, not a new direction.
 
-Planned scope:
-- **Sidebar**: collapses to just a "Dashboard" nav item plus a hamburger
-  toggle. The reference's other nav items are real future destinations, not
-  decoration to fake now: Dashboard (current view), Chat interface (orb +
-  input + output only), Memory (session log + summary, ties to Milestone
-  10's memory work), Tools (a list of what Proxy can do — could just render
-  `commands/tools.ts`'s registry), Maps (Milestone 11), Devices (Milestone
-  12), Settings (Milestone 13). None of these get built now — just the nav
-  rail + toggle.
+Implemented scope:
+- **Sidebar navigation**: collapsed icon rail with working Dashboard and
+  Settings controls plus links to the typed Chat input and existing Camera,
+  Tools, Maps, Devices, and Memory panels.
 - **Activity panel**: refined, not replaced (see Milestone 9 above) —
   friendlier row labels, same real event/timing rules.
 - **Orb**: no change in direction — already correctly event-driven rather
   than a literal copy of the reference's static illustration.
-- **Input box**: add a mic icon inside the box, same trigger as F9
-  (currently hotkey-only, no in-UI equivalent).
-- **Bug fix**: typed text currently disappears if you hit send while Proxy
-  is still busy on a previous request. Should stay in the box (to be sent
-  once Proxy is free) without interrupting the in-flight request.
-- **Output / session log**: shorten to a compact placeholder-style card —
-  the full detailed log view is what the future "Memory" nav destination is
-  for.
+- **Input box**: mic button invokes the same voice trigger as F9.
+- **Busy input**: text submitted while busy is queued and surfaced in the
+  dashboard, then processed after the current request.
+- **Output, session log, monitor, and devices**: dashboard shows current
+  event output and history, real CPU/RAM samples, and present-device
+  inventory. Monitor/device panels may show unavailable until queried.
 - ~~**Camera card**: drop the "Milestone 7 — hand tracking" tag, just
   "CAMERA" — more capabilities are coming to this card later.~~ — DONE,
   pulled forward ahead of the rest of this milestone (bundled into the
   Milestone 13 settings-panel patch instead of shipped alone).
-- **New placeholder cards** (Neural Network graph, Activity chart): styled
-  to match the reference's aesthetic, but kept honest rather than populated
-  with realistic-looking fake data (the reference itself shows fabricated
-  battery %, fake GPS, fake progress bars — fine for a marketing render,
-  not for this app). Extend the existing "COMING SOON" pattern (which
-  already plainly tags unbuilt tiles as "Not built yet"). Worth naming
-  honestly: a literal "neural network" visualization of an LLM's internals
-  isn't something that can be shown truthfully — it's decorative sci-fi
-  flavor, not a data view.
+- **Neural Network graph and Activity chart**: honest not-built placeholders,
+  with no fabricated data.
 - **TTS playback**: "can be made better" — real but loosely specified.
   Needs its own design pass (something like a waveform or speaking-state
   indicator is the likely direction) once we get here.
-- Not scoped yet, deliberately: actually building any of the future nav
-  destinations — this milestone is the shell (sidebar + placeholders + the
-  fixes above) only.
+- Remaining: any further design work and real-machine visual confirmation.
 
-## Milestone 15 — STT upgrade (Distil-Large-v3.5 + GPU) — investigation done, decision pending
+## Milestone 15 — STT upgrade (Distil-Large-v3.5 + GPU) — runtime installed; inference confirmation pending
 
 User asked to switch from `whisper-small.en` to Distil-Large-v3.5 and move
-STT off CPU onto the GPU. Both halves have been investigated (not assumed).
-Short version: the model swap alone is easy; real GPU acceleration is not
-possible with the currently-installed library on Windows, and would require
-a genuine architecture change (different native module, different model
-format, a `stt.ts` rewrite). **Full investigation findings, the
-accuracy/speed tradeoff analysis, and the recommended path forward are in
-`decisions.md`.** Pending your explicit go-ahead before starting, given the
-size of the change.
+STT off CPU onto the GPU. The optional whisper.cpp path converts Proxy's
+16kHz float samples to temporary PCM WAV, launches a configured executable
+asynchronously, and cleans up the temporary file. `npm run setup:whisper`
+downloads the official CUDA 12.4 Windows x64 build and Distil GGML weights,
+verifying their published SHA-256 hashes. The installed executable opens
+and reports its CLI options; running from the project root auto-detects
+both assets. The current Transformers.js CPU path remains the fallback if
+CUDA transcription fails. Real speech inference and GPU utilization
+measurement remain unverified. The model's official GGML conversion is
+described in the [model card](https://huggingface.co/distil-whisper/distil-large-v3.5-ggml).
+Full investigation findings and tradeoffs: `decisions.md`.
 
 ## Deferred / not in MVP
 
@@ -700,7 +721,6 @@ size of the change.
   needed.
 - Targeting window commands at a *named* app ("snap Chrome left") rather
   than whatever's currently focused — see Known limitations below.
-- GPU-accelerated STT — see Milestone 15 above.
 
 ## Known limitations
 
@@ -715,10 +735,9 @@ size of the change.
   currently available (per `npm audit`, checked at Milestone 6). Accepted
   for now since image processing isn't exercised yet — re-check before any
   milestone that does real image work.
-- STT runs on CPU only. GPU (DirectML) was attempted and genuinely doesn't
-  work for this model/library combo right now (full story: `decisions.md`).
-  whisper-small.en on CPU is the current tradeoff. Milestone 15 investigates
-  a real fix.
+- The official whisper.cpp CUDA runtime and Distil GGML model are present
+  under the ignored `models/` folder; a real speech inference still needs
+  confirmation. The Transformers.js CPU path remains the fallback.
 - STT still occasionally mishears words, though less than under base.en —
   not specifically re-tested since the model upgrade.
 - Piper's voice is robotic/synthetic. ElevenLabs is available as an
@@ -785,7 +804,7 @@ size of the change.
   chrome and open youtube," "open youtube on chrome and search for
   pewdiepie," and "open github" were all specifically retested on the
   real machine and route correctly.
-- **Found in real-machine testing, deferred by request, not fixed**: the
+- **Found in real-machine testing; code changes implemented, awaiting retest**: the
   fast tier appears to never actually escalate to the smart tier via
   `defer_to_planner` — the Activity panel consistently shows "deciding:
   fast tier" only. Confirmed two ways in this session: (1) the Gmail
@@ -801,10 +820,10 @@ size of the change.
   cause: `write_file`'s tool description doesn't tell the fast tier
   where its own limits are — nothing currently instructs it to defer for
   anything beyond trivial file writes, so a small model overestimating
-  its own confidence on codegen isn't surprising. **Not fixed** — the
-  user explicitly chose to defer this and address tool-description limits
-  more broadly later (across this tool and future ones) rather than
-  patch `write_file` in isolation right now. Directly informed two
+  its own confidence on codegen isn't surprising. This was deferred at the
+  time; it has now been addressed more broadly: `write_file` recommends
+  deferral for substantial code generation and is marked as informing the
+  next step, so its result reaches the smart-tier loop. Directly informed two
   Milestone 10 Part D design choices (see `decisions.md`): the
   `recall_facts` tool accepted this same "will the model choose to call
   an optional tool" risk knowingly, and automatic memory-capture was
@@ -820,8 +839,9 @@ size of the change.
   pass to actually compose an answer shaped to the question — not a
   `write_file`-specific quirk, a structural property of every current
   fire-and-forget tool (`get_system_usage`, `get_emails`, `write_file`,
-  `open_path`). Still deferred by request, same broader tool-limits pass
-  as above.
+  `open_path`). `get_system_usage` is now also marked as informing the next
+  step so raw readings can be summarized to fit the request. The updated
+  tool flow still needs focused real-machine confirmation.
 - **Found in real-machine testing, fixed in code, not yet re-tested**:
   "who am i" got a rambling reply that doesn't know who's actually
   asking — addressed the user as an anonymous "someone who uses this,"
@@ -834,26 +854,15 @@ size of the change.
   both hardcoded rather than derived, since this is a single-user
   personal project where that's simply always true. Not yet re-tested on
   the real machine — confirm "who am i" gives a real answer now.
-- **Found in real-machine testing, not fixed, needs a real architecture
-  decision**: Electron became unresponsive (Windows' standard "not
-  responding" dialog, wait/close) twice during this session's testing.
-  No confirmed root cause (not reproduced/profiled directly), but the
-  code gives a strong candidate: `stt.ts`'s `transcribe()` runs Whisper
-  inference via a direct `await transcriber(audio, ...)` call - no
-  worker thread, no `utilityProcess.fork()`, no child process - and it's
-  invoked from `engine.ts`, which runs in Electron's own main process
-  (instantiated directly in `main.ts`). The logged transcription time
-  that session was 16.8 seconds; a CPU-bound native ONNX inference call
-  of that length blocking the main process's own message loop is exactly
-  what triggers Windows' unresponsive-app detector, and matches the
-  reported symptom precisely. If this is confirmed, the real fix is
-  moving STT inference off the main process entirely (a worker thread or
-  Electron `utilityProcess`) - a genuine architecture change, not a
-  one-line patch, so this is logged as a finding to revisit deliberately,
-  not fixed here. Worth deliberately triggering a slow transcription
-  again and watching whether the dashboard UI (not just voice) also
-  freezes during it, which would confirm the main-process-blocking
-  theory versus some other cause.
+- **Found in real-machine testing; responsiveness fix implemented, awaiting
+  real-machine confirmation**: Electron previously became unresponsive
+  during slow CPU Whisper inference. The Transformers CPU fallback now
+  loads and transcribes in an Electron utility process (or a Node child
+  process in CLI mode); the optional whisper.cpp path also runs in a child
+  process. Worker errors reject pending requests and clear the process state so a later initialization can
+  retry. This should leave Electron's main event loop available while the
+  CPU model runs, but packaged-process loading, dashboard responsiveness,
+  and real inference still need confirmation on Windows.
 - **Found during this session's own patch verification, fixed and
   confirmed**: `npm test` was silently writing real files
   (`flappybird.html`, `games/snake.js`, `note.txt`, `script.py`) into the
@@ -867,33 +876,30 @@ size of the change.
   this session and possibly others, may have left real files in that
   folder — nothing harmful was ever written (test fixture content only),
   but it's real disk state that didn't need to be there.
-- **Found in real-machine testing**: if the user types into the INPUT box
-  and hits send while Proxy is still busy on a previous request, the typed
-  text currently disappears rather than being preserved. Queued for
-  Milestone 14.
-- The dashboard's session log resets on every relaunch (no persistence yet
-  — Milestone 13).
-- No Bluetooth device data, no map/location data yet — deferred milestones,
-  not silently-faked features (see the "Coming soon" card in
-  `architecture.md`).
+- The dashboard now queues typed input while busy and includes initial
+  device/map panels. Those Windows-specific paths remain unconfirmed here.
 
-## Milestone 17 — Packaging (Windows installer + auto-launch on startup) — not started
+## Milestone 17 — Packaging (Windows installer + auto-launch on startup) — installer built
 
-Currently the dashboard only runs via `npm run dashboard` (dev-mode
-Electron launch) — there's no real distributable build yet. Two genuinely
-easy, well-trodden pieces:
+The dashboard currently runs via `npm run dashboard` (dev-mode Electron
+launch). A distributable NSIS installer is now built. Windows startup is an
+opt-in Settings value (`PROXY_START_ON_LOGIN=true`) applied through
+Electron's `app.setLoginItemSettings()`. Startup remains disabled by
+default; the startup entry is applied only in a packaged build.
+
+The two pieces are:
 - **Packaging**: `electron-builder` (or `electron-forge`) to produce a
   real `.exe` installer, instead of running from source.
 - **Auto-launch on Windows startup**: Electron has
   `app.setLoginItemSettings()` built in for exactly this — no registry
   editing needed, no third-party library.
 
-Not started. Reasonable to bundle with Milestone 14 (dashboard visual
-refresh) timing-wise, since both are about the app being something you'd
-actually hand to "normal Windows startup," but scoped as its own
-milestone since it's unrelated in substance.
+Both pieces are implemented. `npm run package:win` successfully created
+`installer/Proxima-0.1.0-x64.exe` (about 779 MB), including the CSG
+controls. The NSIS installer itself has not been launched on this Windows
+machine yet.
 
-## Milestone 18 — Alternative activation: double-clap trigger — not started
+## Milestone 18 — Alternative activation: double-clap trigger — implemented, opt-in; calibration pending
 
 The hotkey (F9) already works regardless of what app has focus — that's
 existing behavior (Electron's `globalShortcut` is OS-level), not
@@ -902,24 +908,20 @@ additional way to trigger Proxy: two sharp claps within about a second,
 detected continuously in the background, calling the same
 `engine.runOnce()` (or `cancel()` if busy) the hotkey already calls.
 
-Technically a smaller cousin of Milestone 8's VAD — amplitude-spike
-detection, same general family — but with one real architectural
-difference worth being upfront about: VAD only listens once triggered
-(hotkey pressed, then it records); this needs a mic stream open
-*continuously* in the background, discarding audio immediately unless a
-clap pattern fires (never transcribing or storing anything otherwise).
-Not a privacy concern in the sense that matters here, but a real
-difference from how the pipeline works today. False-positive tuning (a
-door slam, keys jangling, an actual clap in a video) will need the same
-kind of calibration work VAD's threshold went through.
+The RMS clap detector is implemented behind the Settings opt-in
+`PROXY_DOUBLE_CLAP_ENABLED=true` (off by default). It opens the mic only
+when enabled, discards frames after checking amplitude, and stops the
+listener before the normal VAD recorder starts. Two threshold-crossing
+peaks in the configured window call the same voice trigger as F9. No audio
+is transcribed or saved by the detector. Real-device false-positive and
+sensitivity calibration remains; the numeric threshold can be adjusted
+through Settings.
 
-## Milestone 19 — System monitor (Task Manager tile + Proxy-queryable resource usage) — Part A done, confirmed; Part B blocked on Milestone 14
+## Milestone 19 — System monitor (Task Manager tile + Proxy-queryable resource usage) — Part A done, confirmed; Part B built
 
-Split once actually scoped, since the two halves turned out to have
-different feasibility: a live hardware-usage sidebar tile (Part B)
-genuinely can't be built yet — there's no sidebar to put it in, that's
-Milestone 14's job, still not started. The orchestrator tool (Part A)
-doesn't have that dependency, so it shipped on its own.
+Part A is an orchestrator query tool; Part B is a dashboard tile. Both
+implementations are present. Part B awaits a clean Electron launch and
+real-machine UI confirmation.
 
 **Part A — `get_system_usage` tool — done, confirmed working on the real
 machine.** Queries CPU%, memory
@@ -940,15 +942,15 @@ for days will always top that list regardless of what's actually busy
 right now. The tool's reply text says so explicitly rather than
 presenting stale cumulative data as live CPU hogging.
 
-**Part B — the sidebar tile — not started, blocked on Milestone 14.**
-Once the sidebar exists, this is mostly a rendering task on top of Part
-A's already-working tool (or a lighter-weight direct PowerShell poll for
-a live-updating graph, TBD when it's actually built) — an aesthetic
-alternative to Ctrl+Shift+Esc, not a replacement for it. The tool alone
-already answers "what's eating my RAM" via voice or the dashboard's
-Input box today — Part B just makes it also glanceable without asking.
+**Part B — dashboard monitor tile — built, awaiting real-machine
+confirmation.** It samples every ten seconds through the same Windows
+query used by the tool, renders CPU and memory bars and the top three
+processes by memory and cumulative CPU time, and shows an unavailable
+state rather than fabricated zeros when the query fails. “Top cumulative
+CPU time” remains labeled honestly; it is not an instantaneous per-process
+CPU percentage.
 
-## Milestone 20 — 3D modeling assistant ("a personalized Blender") — not started, the last major planned undertaking
+## Milestone 20 — 3D modeling assistant ("a personalized Blender") — starter CAD slice built
 
 By far the most ambitious item on this roadmap - explicitly positioned
 last, not because nothing will ever be added after it, but because
@@ -979,38 +981,68 @@ solved is this problem":
    corners") rather than conjuring an arbitrary object whole from a
    sentence.
 
-Recommendation when this gets picked up: phases 1-3 in order first -
-each is independently useful and de-risks the next. Phase 4 stays framed
-as an open research problem to attempt, not a committed deliverable.
+The dashboard supports importing STL/OBJ geometry, adding box, sphere, and
+cylinder primitives, orbiting/zooming the scene, selecting/deleting an
+object, on-screen move/rotate/scale gizmos, numeric position/rotation,
+per-axis dimensions, and uniform-scale editing, geometry bounds/triangle/volume estimates, and
+exporting ASCII STL. Gizmo manipulation also updates the numeric controls.
+With no selection, the local smart model can compose a small assembly of up
+to 12 supported primitives (boxes, spheres, cylinders) from a short request.
+The main process validates each primitive's dimensions, position, and
+rotation before adding any object. With a selection, it can translate
+a short instruction into bounded position/rotation/per-axis-scale changes,
+or round corners on a box primitive. The main process validates transforms
+and caps the rounded-box radius before the scene changes. The selected rounded
+box exposes its radius as an editable numeric parameter. Other geometry edits
+do not execute arbitrary code and remain unsupported.
+Before STL export, choose whether one scene unit represents a millimeter,
+centimeter, or inch; export converts all coordinates to millimeters. STL has
+no unit metadata, so the chosen conversion is stated in the UI after export.
+The selected export scale is also sent with natural-language edits, allowing
+explicit dimensions such as centimeters to be converted into scene units.
+Position, rotation, scale, and resulting dimensions have bounded ranges.
+Shift-click a second object to select a pair, then apply union or subtraction.
+Boolean operations use `three-bvh-csg`, limited to 80,000 input triangles
+per operation. The [upstream project](https://github.com/gkjohnson/three-bvh-csg)
+describes the implementation as experimental: it expects watertight
+two-manifold meshes and numerical edge cases can still produce invalid
+results. Imported meshes may fail if open
+or non-manifold; the editor does not claim print-ready output. OBJ material
+files are not loaded. A user-triggered “Describe preview” button sends the
+canvas image only to the configured local Ollama smart model; it describes
+visible shape only, not measurements or print safety. Geometry measurement
+reports bounds and a volume estimate in arbitrary scene units and does not
+certify manifoldness or printability. For meshes up to 120,000 triangles,
+measurement also reports edge closure/manifold counts, shared-edge winding,
+degenerate faces, and connected components. STL vertices are welded with a
+scale-relative tolerance for this diagnostic. These checks do not test wall
+thickness, self-intersection, material, printer settings, or slicer behavior,
+so the result is not a printability certification. Natural-language mesh
+editing beyond this rounded-box primitive and text-to-3D generation remain.
+WebGL interaction, vision-model
+support, boolean geometry, and exported STL validity still need real-machine
+confirmation.
 
-## Milestone 21 — Personalized news window — not started
+## Milestone 21 — Personalized news — built, awaiting live feed confirmation
 
-A second Electron `BrowserWindow` (or a new sidebar destination — either
-works, both are well-understood patterns) showing news the LLM has
-already filtered and summarized against known interests, not a raw feed
-dump. Fetching doesn't need a paid API — most outlets publish RSS feeds
-directly, no signup, no rate limit. The genuinely personalized version
-("it knows my interests without being told each time") depends on
-Milestone 10 Part D (memory)'s automatic-capture slice, now built
-(pending real-machine confirmation — see the Milestone 10 section
-above); until that's confirmed working end-to-end, or if you'd rather
-not wait, this ships in a simpler form — a static, user-configured
-interest list (similar in spirit to `config/commands.json`) - still real
-and useful, just less automatic than the end state. One of the more
-straightforward items on this roadmap: no new architecture, no ongoing
-cost, composes cleanly with what Milestone 14 already has planned for
-the sidebar.
+The dashboard now has a user-triggered news panel for BBC World/Asia RSS
+headlines, with an optional comma-separated interest filter in Settings.
+The `get_news` tool retrieves the same items and returns them to the local
+model for a composed summary. Article text is treated as untrusted input.
+No periodic polling or paid news API is used. The feeds and current
+network response still need Windows confirmation. Interests remain
+user-set; automatic interest capture from memory is not wired.
 
-## Milestone 22 — Proxy can call your phone — not started, real feasibility researched, genuinely different in kind from everything else here
+## Milestone 22 — Proxy can call your phone — outbound spoken-message slice built; provider setup pending
 
-Verified current: Twilio's Media Streams is the standard, well-documented
-way to do this — it opens a WebSocket to a server you run, streams live
-call audio in real-time, and plays back whatever audio you send. The
-existing Whisper/orchestrator/Piper pipeline could sit behind that
-WebSocket in principle. Flagging plainly, not to discourage it, but
-because it's the first item on this whole roadmap that isn't "more
-capability on the local foundation already built" - it's a real
-architecture branch:
+The first slice uses Twilio's Calls REST API with inline TwiML `<Say>`.
+The model proposes an E.164 destination and exact message, then the engine
+waits for a separate, explicit yes before placing the call. Credentials
+are optional settings and are not present in this repo. No call has been
+made or provider configured. Twilio documents this REST API and inline
+TwiML input in the [Call resource reference](https://www.twilio.com/docs/voice/api/call-resource).
+This first phase is a one-way spoken message, not a live AI conversation.
+The wider interactive version remains a separate architecture branch:
 - **Requires a cloud telephony provider** (Twilio or equivalent) — there
   is no way to place a real PSTN call without one; this is physics/
   regulation, not a gap in available tooling.
@@ -1023,12 +1055,9 @@ architecture branch:
   port-forwarding) — its own small infrastructure project on top of the
   calling feature itself.
 
-Recommendation: start narrow — Proxy places a call only when explicitly
-asked to, proving the pipeline, before ever considering Proxy deciding on
-its own when a call is warranted. The latter is a materially harder,
-easier-to-get-annoying UX problem (what's actually call-worthy, how often
-is too often) that deserves its own real design pass, not an assumption
-baked in alongside the plumbing.
+Live conversational audio, inbound call handling, and call transcripts
+remain unimplemented. The outbound tool still requires user provider setup
+and a real-machine test; Twilio charges for completed calls.
 
 ## Personality/tone: FRIDAY-style address ("sir") — done
 
@@ -1042,45 +1071,37 @@ previously said "hasn't shipped yet" after the change had already landed
 been updated to match. Confirmed live in the real session log too
 (Proxy addressing the user as "sir" unprompted).
 
-## Open questions (need your input)
+## Remaining completion gates
 
-- **Milestone 10 Part C, Gmail slice**: the real-machine test came back
-  "Gmail isn't connected yet" — the tool's own honest not-configured
-  reply, not a real answer. Most likely cause: `GMAIL_REFRESH_TOKEN`
-  never made it into `.env` after running `npm run setup:gmail`, or the
-  app wasn't restarted after editing `.env`. Worth double-checking all
-  three `GMAIL_*` values are actually in `.env` and restarting before
-  retrying "do I have any new emails."
-- **Milestone 10 Part D, memory slice**: try it for real once you've
-  had a few ordinary interactions with Proxy — check
-  `~/.proxima/memory.json` (or wherever `PROXY_MEMORY_FILE` points) to
-  see what it's actually capturing, and try asking something
-  `recall_facts` would need to answer (e.g. "what do you know about my
-  <project>"). Only mocked/unit-tested so far, not confirmed against a
-  real Ollama call end-to-end.
-- **Milestone 10 workspace folder**: `write_file`/`open_path` default to
-  `~/ProxyWorkspace` if `PROXY_WORKSPACE_DIR` isn't set. Now confirmed
-  working at that default — flagging only in case you'd rather point it
-  somewhere else (a synced folder, a specific project directory, etc.).
-- **Tool-limits pass (deferred, narrowed)**: two findings still waiting
-  on the same later pass — (1) the fast tier never deferring to the
-  smart tier (Flappy Bird / Gmail activity-log finding), (2) fire-and-
-  forget tools returning raw, unscoped output regardless of how the
-  question was actually phrased (`get_system_usage` yapping full stats
-  at a casual "you feel laggy"). The third item that used to be grouped
-  here — hardcoding "sir" + the user's identity into `PERSONALITY` — is
-  now done (see `decisions.md`); it turned out small enough not to need
-  the broader pass after all. (1) and (2) still share a root mechanism —
-  see Known Limitations above and `decisions.md` — and Milestone 10 Part
-  D's `recall_facts`/automatic-capture design already had to account for
-  (1)'s risk.
-- **Electron "not responding" during STT** (see Known Limitations above):
-  a real architecture change if the main-process-blocking hypothesis is
-  right (moving `transcribe()` off Electron's main process), not
-  something to patch reflexively. Worth deliberately reproducing first —
-  trigger a slow transcription and check whether the dashboard UI itself
-  also freezes — before committing to a fix approach.
-- **Milestone 15 go-ahead**: do you want to proceed with the whisper.cpp +
-  CUDA + Distil-Large-v3.5-ggml path? It's a real architecture change (new
-  native module, new model format, `stt.ts` rewrite), not a quick patch —
-  see `decisions.md` for the full investigation before deciding.
+These are concrete external setup or real-machine checks, not open design
+decisions. The user has authorized the map's opt-in location request and
+online tile use, deferred browser automation while keeping the everyday
+Chrome profile, and asked for phone calling to be implemented without
+configuring its provider yet.
+
+- **Gmail OAuth**: set all three `GMAIL_*` values, run `npm run
+  setup:gmail`, then restart and verify a real inbox query.
+- **Stock quotes**: add `ALPHA_VANTAGE_API_KEY` in Settings and verify one
+  ticker query. The free tier is limited to 25 requests/day and the default
+  quote is end-of-day; real-time US data is a paid service.
+- **Real Windows checks**: launch the packaged/development app and verify
+  the recent dashboard navigation, map tile request, device inventory,
+  monitor, news refresh, pinch trigger, double-clap calibration, 3D
+  WebGL/import/export behavior, and whisper.cpp speech inference/GPU use.
+  Build success alone does not confirm
+  hardware or online integrations.
+- **iPhone Shortcut/tunnel**: configure a random webhook token and an
+  HTTPS endpoint, then verify delivery from the phone. The listener is
+  bound to localhost by default and does not expose a public endpoint.
+- **Outbound calls**: add Twilio credentials and verify only when the
+  user is ready to incur provider call charges. No call has been placed.
+- **Windows installer**: the NSIS installer is built; install and launch
+  it once to confirm the packaged app and optional startup setting.
+- **Milestone 20 scope**: primitive import/editing, boolean CSG, and
+  natural-language primitive/transform edits and rounded-box corner edits
+  are implemented; bounded topology diagnostics are implemented; broader
+  mesh editing and additional CAD/print-analysis capabilities remain.
+- **Known product limits**: tool-result composition and CPU STT worker
+  isolation are implemented; both still need focused real-machine
+  confirmation. Smart-tier escalation quality also needs interaction-level
+  confirmation after the tool-description updates.

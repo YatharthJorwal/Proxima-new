@@ -68,6 +68,11 @@ const CHANNELS = [
   // dashboard's SESSION LOG card doesn't reset to empty on every
   // relaunch.
   "log-history",
+  // Milestone 19 Part B — periodic real CPU/memory/process sample for
+  // the dashboard monitor card; null means the system query failed.
+  "system-usage",
+  "present-devices",
+  "activation",
 ] as const;
 
 type ProxyChannel = (typeof CHANNELS)[number];
@@ -114,4 +119,10 @@ contextBridge.exposeInMainWorld("proxy", {
   // Promise, so these just pass it straight through.
   getSettings: () => ipcRenderer.invoke("proxy:get-settings"),
   saveSettings: (values: Record<string, string>) => ipcRenderer.invoke("proxy:save-settings", values),
+  fetchNews: () => ipcRenderer.invoke("proxy:fetch-news"),
+  getMemory: () => ipcRenderer.invoke("proxy:get-memory"),
+  clearMemory: () => ipcRenderer.invoke("proxy:clear-memory"),
+  analyzeModelPreview: (imageBase64: string) => ipcRenderer.invoke("proxy:analyze-model", imageBase64),
+  editModelTransform: (request: { prompt: string; kind: string; current: { position: { x: number; y: number; z: number }; rotation: { x: number; y: number; z: number }; scale: number } }) =>
+    ipcRenderer.invoke("proxy:edit-model-transform", request),
 });

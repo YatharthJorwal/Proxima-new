@@ -4,3 +4,8 @@ dist/
 logs/
 *.log
 models/
+/artifacts/
+/artifacts-retry/
+/release/
+/release-output/
+/installer/

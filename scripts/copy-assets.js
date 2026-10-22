@@ -39,12 +39,13 @@
  * dependencies — no Node code ever requires() them) purely so
  * `npm install` fetches these files for us.
  *
- * Plain Node, no extra deps (e.g. cpx/shx) — this is small enough that
- * pulling in a whole package for "copy some files" isn't worth it.
+ * Copying uses plain Node. esbuild is used only to bundle the CSG browser
+ * module and its helpers; no general-purpose copy package is needed.
  */
 
 const fs = require("fs");
 const path = require("path");
+const esbuild = require("esbuild");
 
 function copyRecursive(src, dest) {
   const stat = fs.statSync(src);
@@ -76,6 +77,51 @@ const vendorDir = path.join(root, "dist", "electron", "renderer", "vendor");
 for (const file of ["three.module.js", "three.core.js"]) {
   copyRecursive(path.join(threeBuildDir, file), path.join(vendorDir, file));
 }
+
+// Model importers are sourced from the installed Three.js release. Their
+// browser examples import the bare package name, so rewrite that one
+// specifier to the adjacent vendored core and keep the renderer offline.
+const threeLoadersDir = path.join(root, "node_modules", "three", "examples", "jsm", "loaders");
+const loaderVendorDir = path.join(vendorDir, "loaders");
+fs.mkdirSync(loaderVendorDir, { recursive: true });
+for (const file of ["STLLoader.js", "OBJLoader.js"]) {
+  const source = fs.readFileSync(path.join(threeLoadersDir, file), "utf8");
+  const bundled = source.replace(/from\s+['"]three['"]/g, 'from "../three.module.js"');
+  fs.writeFileSync(path.join(loaderVendorDir, file), bundled, "utf8");
+}
+
+const controlsSource = path.join(root, "node_modules", "three", "examples", "jsm", "controls", "TransformControls.js");
+const controlsVendorDir = path.join(vendorDir, "controls");
+fs.mkdirSync(controlsVendorDir, { recursive: true });
+const controls = fs.readFileSync(controlsSource, "utf8").replace(/from\s+["']three["']/g, 'from "../three.module.js"');
+fs.writeFileSync(path.join(controlsVendorDir, "TransformControls.js"), controls, "utf8");
+
+const geometrySource = path.join(root, "node_modules", "three", "examples", "jsm", "geometries", "RoundedBoxGeometry.js");
+const geometryVendorDir = path.join(vendorDir, "geometries");
+fs.mkdirSync(geometryVendorDir, { recursive: true });
+const roundedBoxGeometry = fs.readFileSync(geometrySource, "utf8").replace(/from\s+["']three["']/g, 'from "../three.module.js"');
+fs.writeFileSync(path.join(geometryVendorDir, "RoundedBoxGeometry.js"), roundedBoxGeometry, "utf8");
+
+// Bundle the CSG implementation and its helper modules into one browser
+// ESM asset. Leave Three external so it shares the dashboard's renderer,
+// then rewrite that import to the already-vendored local Three module.
+const csgBundle = esbuild.buildSync({
+  stdin: {
+    contents: 'import { ADDITION, SUBTRACTION, Brush, Evaluator } from "three-bvh-csg"; export { ADDITION, SUBTRACTION, Brush, Evaluator };',
+    resolveDir: root,
+    sourcefile: "proxima-csg-entry.js",
+    loader: "js",
+  },
+  bundle: true,
+  format: "esm",
+  platform: "browser",
+  target: "chrome120",
+  external: ["three"],
+  write: false,
+  legalComments: "none",
+});
+const csgSource = csgBundle.outputFiles[0].text.replace(/from\s+["']three["']/g, 'from "./three.module.js"');
+fs.writeFileSync(path.join(vendorDir, "three-bvh-csg.js"), csgSource, "utf8");
 
 const mediapipeDir = path.join(root, "node_modules", "@mediapipe", "tasks-vision");
 const mediapipeVendorDir = path.join(vendorDir, "mediapipe");

@@ -29,7 +29,21 @@ This saves `hand_landmarker.task` (~7-9MB) into a `models` folder. Re-run
 this if that file ever goes missing — it's gitignored on purpose (nothing
 about it needs to be shared/versioned), so a fresh clone won't have it.
 
-### 5. Project config
+### 5. Optional GPU speech recognition upgrade
+
+To use Distil-Large-v3.5 through the official whisper.cpp CUDA 12.4
+Windows x64 build, run:
+```
+npm run setup:whisper
+```
+This downloads about 685 MB of runtime and 1.52 GB of model weights,
+checks their published SHA-256 digests, and keeps both under the ignored
+`models/` directory. When running from this project folder, Proxima detects
+the setup after restart. In a separately installed build, enter the
+printed executable and model paths in Settings. The existing CPU
+Transformers recognizer remains the fallback if the CUDA runtime fails.
+
+### 6. Project config
 In the project folder, create a file named `.env`:
 ```
 PIPER_EXE_PATH=<path from step 3.2, or just "piper" if it's on your PATH>
@@ -64,7 +78,7 @@ PROXY_VAD_MAX_MS=15000
 PROXY_VAD_THRESHOLD=
 ```
 
-### 6. Gmail (optional, so Proxy can check your inbox)
+### 7. Gmail (optional, so Proxy can check your inbox)
 Skip this if you don't want Proxy to answer "do I have any new emails" /
 "any emails from X" - everything else in this project works fine without it.
 
@@ -90,10 +104,19 @@ Skip this if you don't want Proxy to answer "do I have any new emails" /
    `GMAIL_REFRESH_TOKEN` line for you to paste into `.env` yourself -
    nothing writes `.env` for you, same as every other credential above.
 
-### 7. Install dependencies
+### 8. Install dependencies
 ```
 npm install
 ```
+
+### 9. Stock quotes (optional)
+Proxy can fetch an Alpha Vantage `GLOBAL_QUOTE` for one ticker at a time.
+Get a free API key from [Alpha Vantage](https://www.alphavantage.co/support/)
+and enter it under **Settings → Market data**. The free service is limited
+to 25 requests per day, and the default quote is end-of-day, not live.
+Real-time and 15-minute-delayed US quotes require a paid provider plan.
+Proxy reports the quote and trading date; it does not make investment
+recommendations. The provider receives the requested ticker and API key.
 If npm warns about pending install scripts (`allow-scripts`), review and
 approve them: `npm approve-scripts --allow-scripts-pending`, then
 `npm install` again. This happens whenever a dependency with a native
@@ -120,6 +143,51 @@ npm run start
 ```
 Press **Enter** in that terminal window, speak your command, and Proxy will
 transcribe it, ask the local LLM, and speak the reply back.
+
+**Build a Windows installer** — creates an x64 NSIS setup program in
+`installer/`. This packages Proxima; it does not install or launch it.
+```
+npm run package:win
+```
+
+## Optional dashboard features
+
+- **Settings** values are saved locally and override `.env`; restart Proxy
+  after changing them. The startup-on-login option is off by default.
+- **Memory** shows facts saved for later conversations; use **Forget all**
+  to clear them after confirmation.
+- **Maps** asks for Windows location only after you click **Enable
+  location**. Online OpenStreetMap tile requests reveal the displayed area
+  to the tile provider.
+- **Camera gestures** require turning on the camera, hand tracking, then
+  **Pinch trigger**. Double-clap activation is separately opt-in and keeps
+  listening to microphone amplitude while enabled; it does not retain or
+  transcribe audio. Calibrate both triggers for your room and hardware.
+- **News** loads current BBC World/Asia headlines only when you refresh.
+- **3D Studio** imports STL/OBJ, edits primitives with move/rotate/scale
+  gizmos, position/rotation controls, and exact per-axis dimensions in
+  arbitrary scene units. It supports boolean union/subtraction, local-model
+  assembly creation from boxes, spheres, and cylinders, per-axis transform
+  edits, rounded-box edits from short text instructions, and a numeric
+  corner-radius control. Generated
+  assemblies are capped at 12 primitives. Shift-click two objects to
+  combine them. Choose whether one scene unit means mm, cm, or inches when
+  exporting; coordinates are converted to millimeters because STL does not
+  store unit metadata. Text edits use the selected scene-unit conversion for
+  explicit physical dimensions.
+  It also reports bounding dimensions and approximate volume in scene
+  units, plus bounded topology checks for closure, edge use, winding,
+  degeneracy, and disconnected components. These checks do not confirm wall
+  thickness or printability. Boolean results depend on closed, manifold input
+  meshes and are not guaranteed print-ready.
+- **iPhone messages** require a Shortcut and a random 32+ character
+  webhook token. The listener binds to localhost by default; remote phone
+  delivery also needs an HTTPS tunnel you configure.
+- **Phone calls** require Twilio credentials and incur provider charges.
+  Proxy reads back the destination and exact spoken message and waits for
+  a separate confirmation before placing a call.
+- **Browser automation** remains disabled by the user's choice to keep
+  their everyday Chrome profile.
 
 ## About the hotkey
 Earlier versions of this project tried a background global-hotkey library

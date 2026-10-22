@@ -1,7 +1,7 @@
 /**
- * Proxy's long-term memory — Milestone 10 Part D (first slice: facts and
- * project context, captured automatically; gesture-to-action wiring, the
- * other Part D item, is separate and not started).
+ * Proxy's long-term memory — Milestone 10 Part D: facts and project
+ * context are captured automatically, queried by tools, and inspectable
+ * or clearable from the dashboard.
  *
  * Two halves live here:
  *   1. Storage — a flat local JSON file, one entry per fact, capped and
@@ -31,6 +31,7 @@ import fs from "fs/promises";
 import path from "path";
 import os from "os";
 import { chat } from "./llm";
+import { writeFileAtomically } from "./atomicFile";
 
 export interface MemoryFact {
   id: string;
@@ -73,7 +74,7 @@ async function loadFacts(): Promise<MemoryFact[]> {
 
 async function saveFacts(facts: MemoryFact[]): Promise<void> {
   await fs.mkdir(path.dirname(MEMORY_FILE), { recursive: true });
-  await fs.writeFile(MEMORY_FILE, JSON.stringify(facts, null, 2), "utf-8");
+  await writeFileAtomically(MEMORY_FILE, JSON.stringify(facts, null, 2));
 }
 
 /**
@@ -110,6 +111,11 @@ async function addFacts(newFactTexts: string[]): Promise<void> {
 /** Exposed for recall_facts.ts (commands/memory.ts) - the only other consumer of stored facts. */
 export async function getStoredFacts(): Promise<MemoryFact[]> {
   return loadFacts();
+}
+
+/** Explicit user control from the dashboard's Memory panel. */
+export async function clearStoredFacts(): Promise<void> {
+  await saveFacts([]);
 }
 
 const EXTRACTION_SYSTEM_PROMPT = `You analyze a single exchange between a user and their local voice

@@ -2,22 +2,17 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self';" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https://tile.openstreetmap.org data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self';" />
   <title>Proxima</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <!-- Milestone 14: sidebar shell. Dashboard and Settings are real,
-       working destinations (Settings just opens the same modal the
-       topbar button already does); the rest are genuine future
-       destinations named in the Milestone 14 plan, shown honestly as
-       "Soon" rather than as working links to nothing - same principle
-       as the COMING SOON card below. Collapsed (icon rail) by default;
-       renderer.js's #sidebarToggle click handler expands/collapses it. -->
+  <!-- Milestone 14: sidebar shell. Entries navigate to real panels in
+       this dashboard; Settings opens the existing settings modal. -->
   <nav class="sidebar" id="sidebar" aria-label="Navigation">
     <button id="sidebarToggle" class="sidebar-toggle" aria-label="Toggle navigation" aria-expanded="false">☰</button>
     <ul class="sidebar-nav">
-      <li class="sidebar-item active" aria-current="page">
+      <li class="sidebar-item active" aria-current="page" data-target="dashboardTop" role="button" tabindex="0">
         <span class="sidebar-icon" aria-hidden="true">▣</span>
         <span class="sidebar-label">Dashboard</span>
       </li>
@@ -27,46 +22,41 @@
       </li>
     </ul>
     <ul class="sidebar-nav sidebar-nav-future">
-      <li class="sidebar-item disabled">
+      <li class="sidebar-item" data-target="cameraPanel" role="button" tabindex="0">
         <span class="sidebar-icon" aria-hidden="true">•</span>
         <span class="sidebar-label">Camera</span>
-        <span class="sidebar-soon">Soon</span>
       </li>
-      <li class="sidebar-item disabled">
+      <li class="sidebar-item" data-target="inputText" role="button" tabindex="0">
         <span class="sidebar-icon" aria-hidden="true">•</span>
-        <span class="sidebar-label">Chat interface</span>
-        <span class="sidebar-soon">Soon</span>
+        <span class="sidebar-label">Chat</span>
       </li>
-      <li class="sidebar-item disabled">
+      <li class="sidebar-item" data-target="memoryPanel" role="button" tabindex="0">
         <span class="sidebar-icon" aria-hidden="true">•</span>
         <span class="sidebar-label">Memory</span>
-        <span class="sidebar-soon">Soon</span>
       </li>
-      <li class="sidebar-item disabled">
+      <li class="sidebar-item" data-target="toolsPanel" role="button" tabindex="0">
         <span class="sidebar-icon" aria-hidden="true">•</span>
         <span class="sidebar-label">Tools</span>
-        <span class="sidebar-soon">Soon</span>
       </li>
-      <li class="sidebar-item disabled">
+      <li class="sidebar-item" data-target="mapPanel" role="button" tabindex="0">
         <span class="sidebar-icon" aria-hidden="true">•</span>
         <span class="sidebar-label">Maps</span>
-        <span class="sidebar-soon">Soon</span>
       </li>
-      <li class="sidebar-item disabled">
+      <li class="sidebar-item" data-target="devicesPanel" role="button" tabindex="0">
         <span class="sidebar-icon" aria-hidden="true">•</span>
         <span class="sidebar-label">Devices</span>
-        <span class="sidebar-soon">Soon</span>
       </li>
     </ul>
   </nav>
 
-  <header class="topbar">
+  <header class="topbar" id="dashboardTop">
     <div class="brand">
       <span class="brand-dot" id="statusDot"></span>
       <span class="brand-name">PROXIMA</span>
     </div>
     <div class="topbar-right">
       <span class="hotkey" id="hotkeyLabel">binding hotkey…</span>
+      <span class="hotkey" id="clapStatus">double-clap: off</span>
       <span class="clock" id="clock">--:--:--</span>
       <button id="settingsBtn" class="settings-btn" title="Settings">⚙ Settings</button>
     </div>
@@ -96,7 +86,7 @@
            until #cameraOnBtn is clicked. This is a preview card; the
            full-featured camera window is a future sidebar destination
            (see the sidebar's "Camera" placeholder). -->
-      <div class="card camera-card">
+      <div class="card camera-card" id="cameraPanel">
         <div class="card-title-row">
           <div class="card-title">CAMERA</div>
           <span class="camera-state-tag" id="cameraStateTag">CAM OFF</span>
@@ -111,6 +101,7 @@
         </div>
         <div class="camera-controls hidden" id="cameraControls">
           <button id="handTrackingToggle" class="camera-toggle-btn" aria-pressed="false">Hand tracking: Off</button>
+          <button id="gestureTriggerToggle" class="camera-toggle-btn" aria-pressed="false" disabled>Pinch trigger: Off</button>
           <button id="cameraOffBtn" class="camera-toggle-btn camera-off-btn">Turn off camera</button>
         </div>
         <div class="camera-status" id="cameraStatus"></div>
@@ -169,6 +160,37 @@
         </div>
       </div>
 
+      <div class="card system-monitor-card">
+        <div class="card-title-row">
+          <div class="card-title">SYSTEM MONITOR</div>
+          <span class="monitor-updated" id="monitorUpdated">Waiting for sample…</span>
+        </div>
+        <div class="monitor-metric">
+          <div class="monitor-metric-heading"><span>CPU</span><span id="monitorCpuValue">—</span></div>
+          <div class="monitor-track"><div class="monitor-fill" id="monitorCpuFill"></div></div>
+        </div>
+        <div class="monitor-metric">
+          <div class="monitor-metric-heading"><span>Memory</span><span id="monitorMemoryValue">—</span></div>
+          <div class="monitor-track"><div class="monitor-fill" id="monitorMemoryFill"></div></div>
+        </div>
+        <div class="monitor-process-title">Top memory use</div>
+        <div class="monitor-process-list" id="monitorTopMemory">Waiting for sample…</div>
+        <div class="monitor-process-title">Top cumulative CPU time</div>
+        <div class="monitor-process-list" id="monitorTopCpu">Waiting for sample…</div>
+      </div>
+
+      <div class="card memory-card" id="memoryPanel">
+        <div class="card-title-row">
+          <div class="card-title">MEMORY</div>
+          <div class="memory-actions">
+            <button id="refreshMemoryBtn" type="button">Refresh</button>
+            <button id="clearMemoryBtn" type="button">Forget all</button>
+          </div>
+        </div>
+        <p class="memory-note">Locally saved facts Proxy may use in later conversations.</p>
+        <div id="memoryList" class="memory-list" aria-live="polite">Select Refresh to view saved facts.</div>
+      </div>
+
       <div class="card card-grow">
         <div class="card-title-row">
           <div class="card-title">SESSION LOG</div>
@@ -177,7 +199,7 @@
         <div class="log" id="log" aria-live="polite">
           <p class="log-empty" id="logEmpty">Every step will show up here as it happens.</p>
         </div>
-        <div class="log-footer-note">Full history → Memory <span class="log-footer-tag">Soon</span></div>
+        <div class="log-footer-note">Full session history → Memory <span class="log-footer-tag">Soon</span></div>
       </div>
 
       <div class="card placeholder-card">
@@ -191,21 +213,68 @@
         <p class="placeholder-note">Will chart real request history once there's some to show.</p>
       </div>
 
-      <div class="card">
-        <div class="card-title">COMING SOON</div>
+      <div class="card" id="toolsPanel">
+        <div class="card-title">LIVE TOOLS</div>
         <div class="soon-list">
-          <div class="soon-row">
-            <span class="soon-name">Connected devices</span>
-            <span class="soon-tag">Not built yet</span>
+          <div class="soon-row" id="devicesPanel"><span class="soon-name">Devices detected now</span></div>
+          <div class="device-list" id="presentDeviceList" aria-live="polite">Waiting for Windows device inventory…</div>
+          <div class="soon-row" id="mapPanel"><span class="soon-name">Live map</span></div>
+          <div class="map-controls">
+            <button id="mapLocationBtn" type="button">Enable location</button>
+            <span id="mapStatus" aria-live="polite">Location is off until you enable it.</span>
           </div>
-          <div class="soon-row">
-            <span class="soon-name">Live map</span>
-            <span class="soon-tag">Not built yet</span>
+          <div class="map-privacy-note">Proxima requests location only when you enable it. Tile requests disclose the viewed map area to OpenStreetMap.</div>
+          <div class="map-tiles" id="mapTiles" aria-label="OpenStreetMap"></div>
+          <div class="map-attribution">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a></div>
+          <div class="soon-row"><span class="soon-name">News</span><button id="newsRefreshBtn" type="button">Refresh</button></div>
+          <div id="newsStatus" aria-live="polite">Refresh to load current headlines.</div>
+          <div id="newsList" class="news-list"></div>
+          <div class="soon-row"><span class="soon-name">3D Studio (early)</span></div>
+          <div class="model-toolbar">
+            <button id="addBoxBtn" type="button">Add box</button>
+            <button id="addSphereBtn" type="button">Add sphere</button>
+            <button id="addCylinderBtn" type="button">Add cylinder</button>
+            <button id="importModelBtn" type="button">Import STL/OBJ</button>
+            <button id="modelMoveMode" class="model-gizmo-mode" type="button" aria-pressed="true">Move gizmo</button>
+            <button id="modelRotateMode" class="model-gizmo-mode" type="button" aria-pressed="false">Rotate gizmo</button>
+            <button id="modelScaleMode" class="model-gizmo-mode" type="button" aria-pressed="false">Scale gizmo</button>
+            <button id="unionModelBtn" type="button">Union two objects</button>
+            <button id="subtractModelBtn" type="button">Subtract second</button>
+            <button id="analyzeModelBtn" type="button">Describe preview</button>
+            <button id="measureModelBtn" type="button">Measure / inspect mesh</button>
+            <button id="deleteModelBtn" type="button">Delete selected</button>
+            <button id="exportStlBtn" type="button">Export STL</button>
           </div>
-          <div class="soon-row">
-            <span class="soon-name">Project tracking</span>
-            <span class="soon-tag">Not built yet</span>
+          <div class="model-natural-edit">
+            <label for="modelEditPrompt">Describe a primitive or transform</label>
+            <div class="model-edit-row">
+              <input id="modelEditPrompt" type="text" maxlength="400" placeholder="e.g. add a cylinder, or make the selected object twice as tall" />
+              <button id="applyModelEditBtn" type="button">Apply local edit</button>
+            </div>
           </div>
+          <input id="modelFileInput" type="file" accept=".stl,.obj,model/stl,text/plain" hidden />
+          <canvas id="modelCanvas" aria-label="3D model workspace"></canvas>
+          <div class="model-transform-grid">
+            <label>X <input id="modelX" type="number" min="-100" max="100" step="0.1" value="0"></label>
+            <label>Y <input id="modelY" type="number" min="-100" max="100" step="0.1" value="0"></label>
+            <label>Z <input id="modelZ" type="number" min="-100" max="100" step="0.1" value="0"></label>
+            <label>Rotate X° <input id="modelRotX" type="number" min="-360" max="360" step="5" value="0"></label>
+            <label>Rotate Y° <input id="modelRotY" type="number" min="-360" max="360" step="5" value="0"></label>
+            <label>Rotate Z° <input id="modelRotZ" type="number" min="-360" max="360" step="5" value="0"></label>
+          </div>
+          <div class="model-dimension-grid">
+            <label>X dimension <input id="modelDimX" type="number" min="0.01" max="1000" step="0.1" value="1"></label>
+            <label>Y dimension <input id="modelDimY" type="number" min="0.01" max="1000" step="0.1" value="1"></label>
+            <label>Z dimension <input id="modelDimZ" type="number" min="0.01" max="1000" step="0.1" value="1"></label>
+          </div>
+          <label id="modelCornerRadiusRow" class="model-corner-radius hidden">Rounded-box corner radius <input id="modelCornerRadius" type="number" min="0.005" step="0.01" value="0.1"></label>
+          <label class="model-scale-label">Uniform scale factor <input id="modelScale" type="range" min="0.2" max="3" step="0.1" value="1"></label>
+          <label class="model-stl-unit">STL scale <span>1 scene unit =</span>
+            <select id="modelStlUnit"><option value="mm">1 mm</option><option value="cm">1 cm</option><option value="in">1 inch</option></select>
+          </label>
+          <div id="modelStatus" aria-live="polite">Add a primitive, drag to orbit, scroll to zoom. Choose the STL scale before export.</div>
+          <div id="modelMetrics" class="model-metrics" aria-live="polite"></div>
+          <div id="modelAnalysis" class="model-analysis" aria-live="polite"></div>
         </div>
       </div>
     </section>

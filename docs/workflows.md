@@ -8,12 +8,20 @@ verification actually happens here.
 - `npm run start` — CLI mode (Enter-key trigger, console logging of engine
   events).
 - `npm run dashboard` — build + launch the Electron dashboard.
+- `npm run package:win` — build assets and create the Windows x64 NSIS
+  installer under `installer/` (requires electron-builder's Windows
+  packaging tools).
 - `npm run build` — TypeScript compile + `copy-assets.js` (copies
   `electron/renderer`, `config/commands.json`, vendored three.js/MediaPipe,
   and the hand-tracking model if present, into `dist/`).
 - `npm run setup:cv` — one-time download of `hand_landmarker.task` via
   `scripts/download-hand-model.js`. Needed once before CV works locally,
   since the build sandbox has no network access to fetch it itself.
+- `npm run setup:whisper` — checksum-verifies and installs the official
+  whisper.cpp CUDA 12.4 Windows x64 runtime plus Distil-Large-v3.5 GGML
+  weights under the ignored `models/` folder. When launched from the
+  project root, Proxima discovers them automatically; a packaged app can
+  use the printed paths through Settings.
 - `npm run setup:gmail` — one-time OAuth authorization for Gmail
   (Milestone 10 Part C, Gmail slice), via `scripts/gmail-auth.js`. Needs
   `GMAIL_CLIENT_ID`/`GMAIL_CLIENT_SECRET` already in `.env` first (Google
@@ -68,15 +76,37 @@ assistant.
   Cloud Console setup + `npm run setup:gmail` walkthrough: `README.md`.
   Without all three set, `get_emails` gives an honest "Gmail isn't
   connected yet" reply rather than a generic failure.
+- `ALPHA_VANTAGE_API_KEY` — optional Milestone 10 Part C stock quote
+  integration. Enter the free key in Settings. The default `GLOBAL_QUOTE`
+  is end-of-day data; the provider's free tier currently allows 25 requests
+  per day. Real-time and 15-minute-delayed US quotes require a paid plan.
+- `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` —
+  optional Milestone 22 outbound call setup. Store these in local Settings
+  or `.env`; Proxy does not call anyone until it reads back the destination
+  and exact spoken message and receives a separate yes. This first slice
+  places a one-way spoken message, not a live conversational call.
+- `PROXY_NEWS_INTERESTS` — optional comma-separated keywords used by the
+  Milestone 21 headline filter. Empty means show current configured feeds.
+- `PROXY_IPHONE_WEBHOOK_TOKEN` — optional Milestone 16 secret. When set,
+  the app starts an authenticated SMS listener on `127.0.0.1:8787` by
+  default. Set bind/port for a chosen LAN/tunnel setup. Expose it only via
+  HTTPS with a random Bearer token of at least 32 characters configured in
+  the iPhone Shortcut. Messages are kept in a local JSON file.
+- `PROXY_WHISPER_CPP_EXE` and `PROXY_WHISPER_CPP_MODEL` — optional
+  Milestone 15 executable/model paths. When both are set, STT uses
+  whisper.cpp; CUDA acceleration requires a CUDA-enabled Windows build.
+  If either is blank, Proxima uses the CPU Transformers model in an
+  Electron utility process (or a Node child process in CLI mode) so
+  inference does not run on Electron's main event loop.
+- `PROXY_DOUBLE_CLAP_ENABLED` — double-clap mic listener, disabled unless
+  explicitly set to `true` in Settings. It continuously checks amplitude
+  and does not retain or transcribe audio. `PROXY_DOUBLE_CLAP_THRESHOLD`
+  adjusts sensitivity; calibrate on the actual room/microphone.
 - `PROXY_MEMORY_FILE` (default `~/.proxima/memory.json`) — Milestone 10
-  Part D. Where Proxy's automatically-captured facts/preferences/project
-  context are stored — a flat JSON list, capped at 30 entries, oldest
-  pruned first. Read directly in `core/memory.ts`, same env-override-
-  with-sane-default pattern as `PROXY_WORKSPACE_DIR` above — but
-  deliberately not defaulted to somewhere inside the workspace folder,
-  since that folder is for files the user asked Proxy to write, not
-  Proxy's own internal state. No manual editing/review tooling in v1;
-  it's a plain JSON file if you want to look at or clear it directly.
+  Part D. Automatically captured facts/preferences/project context — a
+  flat JSON list, capped at 30 entries, oldest pruned first. The dashboard
+  Memory panel can review and clear the store. The file remains local
+  internal state outside the workspace folder.
 - `PROXY_SCRIPT_TIMEOUT_MS` (default `15000`) — Milestone 10 Part B.
   How long `run_script` lets a confirmed script run before killing it via
   `execFile`'s `timeout` option. Read directly in `runScript.ts`. Mainly

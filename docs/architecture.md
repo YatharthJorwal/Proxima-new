@@ -250,13 +250,14 @@ reply. Design principle: **show the process, never hide it.**
   read-only for events, plus `proxy.submitText(text)` as the one write-path
   (the dashboard's Input box).
 - `electron/renderer/` — plain HTML/CSS/JS, no framework. `renderer.js`
-  also contains the Milestone 7 camera + MediaPipe logic.
+  also contains the Milestone 7 camera + MediaPipe logic, opt-in map/news
+  panels, and the primitive 3D model workspace.
 - **Security defaults**: `contextIsolation: true`, `nodeIntegration: false`,
   `sandbox: true`; `session.defaultSession.setPermissionRequestHandler`
-  explicitly allowlists only `"media"` (camera) and denies everything else
-  (Electron denies permission requests by default on a `file://` origin, so
-  `getUserMedia()` would otherwise hang/reject with no camera ever
-  appearing).
+  allows `"media"` (camera) and `"geolocation"` (requested only after the
+  user clicks Enable location) and denies everything else. The map requests
+  OpenStreetMap tiles only after location is explicitly requested, with
+  visible attribution; the provider sees the viewed tile coordinates.
 - **Orb visualization**: a live three.js orb ("PROXIMA CORE"), vendored
   locally (not a CDN, consistent with this being a local-first app). Its
   rotation speed, color, and pulse map directly to engine state (idle /
@@ -268,10 +269,10 @@ reply. Design principle: **show the process, never hide it.**
   - **Vendoring gotcha**: `three.module.js` is not a single self-contained
     bundle — it imports `./three.core.js`. Both files must be copied into
     the vendor directory together, or the import fails at runtime.
-- **"Coming soon" card**: honestly lists dashboard capabilities that aren't
-  built yet (camera feed tagged specifically as Milestone 7 / Computer
-  Vision, others as "not built yet") rather than displaying fabricated data
-  for panels the reference design showed but Proxy doesn't actually have.
+- **Live Tools card**: contains real present-device inventory, opt-in map
+  view, manually refreshed RSS headlines, and an early primitive 3D editor.
+  Location stays off until explicitly enabled; no fake data fills the other
+  placeholder activity/graph panels.
 - **Per-stage timing**: each Activity panel row shows a live-ticking timer
   while active and freezes the elapsed time on completion (via
   `performance.now()` deltas), plus a real one-line description per row —
@@ -400,8 +401,11 @@ assuming it's done or not done.
   expose reliable per-process instantaneous CPU% as cheaply as memory.
   5 unit tests cover the parsing, including PowerShell's single-item-
   array-collapses-to-bare-object quirk. Full reasoning: `decisions.md`.
-  The sidebar's visual "Task Manager" tile (Part B) isn't built yet —
-  blocked on Milestone 14's sidebar navigation existing at all.
+  The dashboard's SYSTEM MONITOR tile (Part B) samples the same API every
+  ten seconds and shows real CPU, memory, and top-process values. The
+  Connected Devices card samples currently-present Bluetooth/audio
+  endpoints using Windows PnP every thirty seconds; this is a presence
+  snapshot, not a Bluetooth-link or signal-strength monitor.
 - `orchestrator.ts` — the multi-step loop: LLM proposes a step, step
   executes, result feeds back to the LLM, repeat until it signals done or a
   safety cap is hit (a small ReAct-style agent loop). Includes escalation

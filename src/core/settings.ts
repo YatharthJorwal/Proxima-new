@@ -51,6 +51,7 @@ import fs from "fs";
 import fsp from "fs/promises";
 import path from "path";
 import os from "os";
+import { writeFileAtomically } from "./atomicFile";
 
 // One list, used both to know what to load/save and to know what NOT to
 // silently pass through if the renderer ever sent something unexpected
@@ -64,7 +65,21 @@ export const SETTINGS_KEYS = [
   "GMAIL_CLIENT_ID",
   "GMAIL_CLIENT_SECRET",
   "GMAIL_REFRESH_TOKEN",
+  "ALPHA_VANTAGE_API_KEY",
   "PROXY_HOTKEY",
+  "PROXY_START_ON_LOGIN",
+  "PROXY_NEWS_INTERESTS",
+  "TWILIO_ACCOUNT_SID",
+  "TWILIO_AUTH_TOKEN",
+  "TWILIO_FROM_NUMBER",
+  "PROXY_IPHONE_WEBHOOK_TOKEN",
+  "PROXY_IPHONE_WEBHOOK_BIND",
+  "PROXY_IPHONE_WEBHOOK_PORT",
+  "PROXY_IPHONE_MESSAGES_FILE",
+  "PROXY_WHISPER_CPP_EXE",
+  "PROXY_WHISPER_CPP_MODEL",
+  "PROXY_DOUBLE_CLAP_ENABLED",
+  "PROXY_DOUBLE_CLAP_THRESHOLD",
   "PROXY_ORCHESTRATOR_MAX_STEPS",
   "PROXY_SCRIPT_TIMEOUT_MS",
   "PROXY_WORKSPACE_DIR",
@@ -119,6 +134,19 @@ function applySavedSettingsToEnv(): void {
 // function callers remember to invoke instead.
 applySavedSettingsToEnv();
 
+// The optional setup:whisper command stores its verified runtime and
+// model under this checkout's ignored models/ directory. Make that
+// local setup work out of the box when running from the project root,
+// while always respecting explicit .env or Settings values first.
+const localWhisperRuntime = path.join(process.cwd(), "models", "whisper.cpp-b5454-cuda12.4", "whisper-cli.exe");
+const localWhisperModel = path.join(process.cwd(), "models", "ggml-model.bin");
+if (!process.env.PROXY_WHISPER_CPP_EXE && fs.existsSync(localWhisperRuntime)) {
+  process.env.PROXY_WHISPER_CPP_EXE = localWhisperRuntime;
+}
+if (!process.env.PROXY_WHISPER_CPP_MODEL && fs.existsSync(localWhisperModel)) {
+  process.env.PROXY_WHISPER_CPP_MODEL = localWhisperModel;
+}
+
 /**
  * What the Settings modal actually shows: the CURRENTLY EFFECTIVE value
  * of every known setting, whatever its source (a saved override, .env,
@@ -157,5 +185,5 @@ export async function saveSettings(values: SettingsMap): Promise<void> {
     }
   }
   await fsp.mkdir(path.dirname(SETTINGS_FILE), { recursive: true });
-  await fsp.writeFile(SETTINGS_FILE, JSON.stringify(toPersist, null, 2), "utf-8");
+  await writeFileAtomically(SETTINGS_FILE, JSON.stringify(toPersist, null, 2));
 }

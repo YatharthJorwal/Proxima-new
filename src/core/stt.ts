@@ -1,66 +1,129 @@
 /**
- * Speech-to-text: turns recorded mic audio into text using a local
- * Whisper model (runs via ONNX — no cloud, no API key).
- *
- * Tries to run on GPU via DirectML ('dml') first — Windows' built-in GPU
- * acceleration API, works with any DirectX12-capable GPU (the RTX 3060
- * qualifies) without needing a separately-installed, version-matched CUDA
- * toolkit. Falls back to CPU automatically if that init fails for any
- * reason, so this degrades gracefully rather than crashing on startup.
- *
- * The model downloads once on first run (small.en is ~240MB) and is
- * cached locally after that.
+ * Speech-to-text dispatch. The optional whisper.cpp runtime already runs
+ * in a child process; the Transformers CPU fallback runs in an Electron
+ * utility process (or Node child process in CLI mode) so inference cannot
+ * block Electron's main event loop or share native runtime state in a thread.
  */
 
-import { pipeline } from "@huggingface/transformers";
+import { ChildProcess, fork } from "child_process";
+import { transcribeWithWhisperCpp } from "./whisperCpp";
 
-// Typed as `any` on purpose: @huggingface/transformers' pipeline() has so
-// many overloads that TypeScript hits a hard complexity limit (TS2590)
-// trying to infer its exact return type. Casting to `any` sidesteps that —
-// this is a known quirk of the library, not a mistake in our code.
-let transcriber: any = null;
+const WHISPER_CPP_EXE = process.env.PROXY_WHISPER_CPP_EXE || "";
+const WHISPER_CPP_MODEL = process.env.PROXY_WHISPER_CPP_MODEL || "";
+let whisperCppUnavailable = false;
+let cpuWorker: any = null;
+let nextRequestId = 1;
+let cpuWorkerReady = false;
 
-// small.en is a real accuracy step up from base.en — should help with the
-// mishearing issues noted in CLAUDE.md (e.g. "Discord" heard as "this
-// code"), while still being light enough to transcribe short commands
-// quickly, especially now that it's running on GPU rather than CPU.
-const MODEL_NAME = "Xenova/whisper-small.en";
-
-export async function initSTT(): Promise<void> {
-  console.log(`Loading speech-to-text model (${MODEL_NAME})...`);
-
-  // We tried DirectML ('dml') here for GPU acceleration — it loads fine,
-  // but hits a reproducible bug during actual transcription: Whisper's
-  // autoregressive decoding loop comes back with zero output tokens via
-  // the DML execution provider, throwing "token_ids must be a non-empty
-  // array of integers" on every request. This looks like a DirectML
-  // execution-provider maturity issue with Whisper's encoder/decoder +
-  // KV-cache generation loop specifically, not something fixable from our
-  // code. Sticking with CPU for correctness — revisit if a future
-  // onnxruntime-node/transformers.js release fixes DML+seq2seq
-  // generation, or if you want to try 'cuda' instead (needs a matching
-  // CUDA toolkit install, which is why we didn't reach for it first).
-  transcriber = await (pipeline as any)("automatic-speech-recognition", MODEL_NAME);
-  console.log("Speech-to-text ready (CPU).");
+interface PendingWorkerRequest {
+  resolve(value: unknown): void;
+  reject(error: Error): void;
 }
 
-/**
- * Transcribes 16kHz mono audio (as a Float32Array, samples in range -1..1).
- */
-export async function transcribe(audio: Float32Array): Promise<string> {
-  if (!transcriber) {
-    throw new Error("STT not initialized — call initSTT() first.");
+const pendingRequests = new Map<number, PendingWorkerRequest>();
+
+function rejectPendingWorkerRequests(error: Error): void {
+  for (const request of pendingRequests.values()) request.reject(error);
+  pendingRequests.clear();
+}
+
+function handleWorkerMessage(worker: any, message: { id: number; ok: boolean; value?: unknown; error?: string }): void {
+    const request = pendingRequests.get(message.id);
+    if (!request) return;
+    pendingRequests.delete(message.id);
+    if (message.ok) request.resolve(message.value);
+    else request.reject(new Error(message.error || "Speech recognition worker failed."));
+    if (pendingRequests.size === 0) {
+      worker.unref?.();
+      worker.channel?.unref?.();
+    }
+}
+
+function createCpuWorker(): any {
+  const modulePath = require.resolve("./sttWorker");
+  const worker: any = process.versions.electron
+    ? (require("electron") as typeof import("electron")).utilityProcess.fork(modulePath, [], { serviceName: "Proxima Speech Recognition" })
+    : fork(modulePath, [], { serialization: "advanced" });
+  if (worker instanceof ChildProcess) {
+    worker.unref();
+    worker.channel?.unref();
   }
-
-  // Note: whisper-small.en, like base.en, is the English-only variant — it
-  // doesn't accept a `language` option at all (only multilingual whisper
-  // models do), so we just pass the sample rate.
-  const start = Date.now();
-  const output = await transcriber(audio, {
-    sampling_rate: 16000,
+  const receive = (message: { id: number; ok: boolean; value?: unknown; error?: string }) => handleWorkerMessage(worker, message);
+  if (worker instanceof ChildProcess) worker.on("message", receive);
+  else worker.on("message", (_event: unknown, message: { id: number; ok: boolean; value?: unknown; error?: string }) => receive(message));
+  worker.on("error", (error: Error) => {
+    if (cpuWorker === worker) {
+      cpuWorker = null;
+      cpuWorkerReady = false;
+    }
+    rejectPendingWorkerRequests(error);
   });
-  console.log(`(transcribed in ${Date.now() - start}ms)`);
+  worker.on("exit", (code: number) => {
+    if (cpuWorker !== worker) return;
+    cpuWorker = null;
+    cpuWorkerReady = false;
+    if (pendingRequests.size > 0) rejectPendingWorkerRequests(new Error(`Speech recognition worker exited with code ${code}.`));
+  });
+  return worker;
+}
 
-  const text = Array.isArray(output) ? output[0]?.text : output.text;
-  return (text ?? "").trim();
+function cpuRequest(type: "init" | "transcribe", audio?: Float32Array): Promise<unknown> {
+  const worker = cpuWorker ?? (cpuWorker = createCpuWorker());
+  const id = nextRequestId++;
+  worker.ref?.();
+  worker.channel?.ref?.();
+  return new Promise((resolve, reject) => {
+    pendingRequests.set(id, { resolve, reject });
+    try {
+      if (audio) {
+        const ownedAudio = audio.slice();
+        const message = { id, type, audio: ownedAudio.buffer };
+        if (worker instanceof ChildProcess) worker.send(message);
+        else worker.postMessage(message);
+      } else {
+        const message = { id, type };
+        if (worker instanceof ChildProcess) worker.send(message);
+        else worker.postMessage(message);
+      }
+    } catch (error) {
+      pendingRequests.delete(id);
+      if (pendingRequests.size === 0) {
+        worker.unref?.();
+        worker.channel?.unref?.();
+      }
+      reject(error instanceof Error ? error : new Error(String(error)));
+    }
+  });
+}
+
+export async function initSTT(): Promise<void> {
+  if (WHISPER_CPP_EXE && WHISPER_CPP_MODEL) {
+    console.log("Using configured whisper.cpp model; CUDA acceleration depends on the installed binary build.");
+    return;
+  }
+  await initCpuTranscriber();
+}
+
+async function initCpuTranscriber(): Promise<void> {
+  if (cpuWorkerReady) return;
+  console.log("Loading the CPU speech-to-text model in an isolated process...");
+  await cpuRequest("init");
+  cpuWorkerReady = true;
+  console.log("Speech-to-text ready (isolated CPU process).");
+}
+
+/** Transcribes 16kHz mono audio (Float32Array samples in the range -1..1). */
+export async function transcribe(audio: Float32Array): Promise<string> {
+  if (WHISPER_CPP_EXE && WHISPER_CPP_MODEL && !whisperCppUnavailable) {
+    try {
+      return await transcribeWithWhisperCpp(audio, WHISPER_CPP_EXE, WHISPER_CPP_MODEL);
+    } catch (error) {
+      whisperCppUnavailable = true;
+      console.error("whisper.cpp failed; falling back to the CPU Transformers worker:", error);
+      await initCpuTranscriber();
+    }
+  }
+  if (!cpuWorkerReady) throw new Error("STT not initialized — call initSTT() first.");
+  const output = await cpuRequest("transcribe", audio) as string;
+  return output.trim();
 }

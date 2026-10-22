@@ -34,7 +34,7 @@
 
 import { EventEmitter } from "events";
 import { initSTT, transcribe } from "./stt";
-import { speak } from "./tts";
+import { speak, stopSpeaking } from "./tts";
 import { recordUntilSilence } from "./audioUtils";
 import { chat, ModelTier } from "./llm";
 import { normalizeForSpeech } from "./textForSpeech";
@@ -42,7 +42,7 @@ import { tryHandleCommand, RegexCommandResult } from "../commands";
 import { Orchestrator } from "../commands/orchestrator";
 import { extractAndStoreMemories } from "./memory";
 import { tryResolvePendingConfirmation, getPendingConfirmation } from "../commands/runScript";
-import { tryResolvePendingBrowserConfirmation, getPendingBrowserConfirmation } from "../commands/browserAutomation";
+import { resolvePendingPhoneCall, getPendingPhoneCall } from "../commands/phoneCall";
 
 // Milestone 8 (VAD) tuning knobs — optional .env overrides, same pattern
 // as PROXY_HOTKEY in electron/main.ts. Read here rather than in
@@ -205,16 +205,28 @@ export class ProxyEngine extends EventEmitter {
   /**
    * Requests the current orchestrator run (if any) stop as soon as
    * possible — see Orchestrator.cancel()'s docs for what "as soon as
-   * possible" actually means (next loop boundary, not mid-request).
-   * Harmless to call when nothing's cancellable in flight — a regex
-   * fast-path reply, or TTS playback, or simply an idle engine — since
-   * Orchestrator.cancel() just sets a flag nothing will ever read in
-   * that case. Callers (main.ts, assistant.ts) decide what triggers
-   * this — a second hotkey press, typed "stop," Enter pressed again.
+   * possible" actually means (next loop boundary, not mid-request) — and
+   * cuts off TTS playback immediately if a reply is already being
+   * spoken (tts.ts's stopSpeaking() — see that file's docblock for why
+   * this needed its own fix; the orchestrator being done by the time
+   * playback starts meant cancel() used to have nothing left to cancel
+   * during the part that can run the longest). Harmless to call when
+   * nothing's cancellable in flight — a regex fast-path reply, or simply
+   * an idle engine — since both halves are no-ops in that case. Callers
+   * (main.ts, assistant.ts) decide what triggers this — a second hotkey
+   * press, typed "stop," Enter pressed again.
    */
   cancel(): void {
     this.orchestrator.cancel();
     this.pendingText = null;
+    if (stopSpeaking()) {
+      // The orchestrator loop had already finished by this point (see
+      // this method's docs above) - smartLoop()'s own "cancelled" check
+      // will never run again for a turn that's already past it, so this
+      // IS the cancellation signal for this turn; emit it directly
+      // rather than relying on that check to fire.
+      this.emit("cancelled");
+    }
   }
 
   /** True while a request is in flight — callers can use this to ignore/queue triggers. */
@@ -314,9 +326,7 @@ export class ProxyEngine extends EventEmitter {
     // actually pending at once, so this is a plain fallthrough chain,
     // not a real priority decision between the two.
     let confirmation = await tryResolvePendingConfirmation(text);
-    if (!confirmation.handled) {
-      confirmation = await tryResolvePendingBrowserConfirmation(text);
-    }
+    if (!confirmation.handled) confirmation = await resolvePendingPhoneCall(text);
 
     let reply: string;
     if (confirmation.handled) {
@@ -342,14 +352,12 @@ export class ProxyEngine extends EventEmitter {
         );
         reply = result.reply;
 
-        // Milestone 10 Part B / browser automation — this run's reply is
-        // the confirmation *request* text (neither tool's execute() runs
-        // anything itself in that case); surface that something is now
-        // awaiting a yes/no on the next turn. Checked via the two
-        // getPending*() functions rather than result.toolsUsed alone,
+        // Confirmation-request tools do not execute the external action
+        // yet; surface the pending action so the user can inspect it.
+        // Checked against pending state rather than result.toolsUsed,
         // since a pending confirmation is the actual state that matters
         // here, not just which tool ran.
-        const nowPending = getPendingConfirmation() ?? getPendingBrowserConfirmation();
+        const nowPending = getPendingConfirmation() ?? getPendingPhoneCall();
         if (nowPending) {
           this.emit("awaiting-confirmation", nowPending);
         }

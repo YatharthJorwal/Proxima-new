@@ -107,12 +107,9 @@ were investigated properly rather than assumed:
   actually lighter than whisper-small's. No confident number exists for
   this specific pair on short audio; this genuinely needs a real-machine
   benchmark once built, not a projection.
-- **The actual path to real GPU speed, found and verified feasible**: drop
-  `@huggingface/transformers` for a Node binding around whisper.cpp (mature,
-  proven CUDA support on Windows, unlike DirectML) — `nodejs-whisper`
-  (actively maintained, a plain `withCuda: true` option) or
-  `whisper-node-addon` (prebuilt Windows x64 binaries, built for Electron,
-  recently added CUDA backend binaries) are both real, current candidates.
+- **The actual path to real GPU speed**: invoke a CUDA-enabled whisper.cpp
+  Windows executable (mature CUDA backend) and use the official GGML model,
+  rather than relying on the current ONNX/DirectML path.
   Distil-Large-v3.5 already has an official GGML conversion
   (`distil-whisper/distil-large-v3.5-ggml`, published by the Distil-Whisper
   team itself) — meaning both halves of what the user wants are achievable
@@ -121,10 +118,11 @@ were investigated properly rather than assumed:
   module instead of `@huggingface/transformers`), a model format change
   (GGML instead of ONNX), and a rewrite of `stt.ts` around a different API
   shape — a real architecture decision for a subsystem that's currently
-  working. Recommended direction: pursue the whisper.cpp + CUDA +
-  Distil-Large-v3.5-ggml path as its own properly-scoped piece of work,
-  the same way Milestone 9 got a design pass before any code. Pending the
-  user's explicit go-ahead given the size of the change.
+  working. The user authorized the full roadmap. An optional subprocess
+  wrapper is now implemented in `core/whisperCpp.ts` and preserves the
+  existing CPU fallback. CUDA binaries, model weights, and a real-machine
+  benchmark remain outstanding; this environment has no CMake/CUDA compiler
+  or model assets.
 
 Also fixed along the way: a TypeScript complexity error (TS2590) in
 `stt.ts`, resolved by typing the transcriber as `any`.
@@ -1015,10 +1013,10 @@ question this whole feature is designed to route around.
 
 **Execution**: `execFile`'s async/callback form — never
 `execFileSync` — specifically because this session already found a real
-hang (STT blocking Electron's main process synchronously causes
-Windows' "not responding" dialog; see project-status.md's Known
-Limitations). A script that ran synchronously here would risk the exact
-same failure mode for an unrelated reason. `execFile`'s `timeout` option
+hang during slow STT inference (see project-status.md's Known
+Limitations and process-isolation fix). A script that ran synchronously here
+would risk the same Windows "not responding" failure mode for an
+unrelated reason. `execFile`'s `timeout` option
 (configurable via `PROXY_SCRIPT_TIMEOUT_MS`, default 15s) kills a
 runaway script rather than letting Electron hang waiting on it
 indefinitely. Output capped at 500 characters in the spoken reply —

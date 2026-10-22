@@ -1,8 +1,7 @@
 /**
  * System usage tool — "what's eating my RAM", "how's my CPU doing", and
- * similar. Milestone 19 Part A (the tool half; the sidebar's aesthetic
- * "Task Manager" tile is Part B, blocked on Milestone 14's sidebar
- * navigation existing at all — see project-status.md).
+ * similar. Milestone 19 Part A (the tool half; the live dashboard tile
+ * is Part B and lives in the Electron renderer — see project-status.md).
  *
  * The first *query* tool in this codebase, as opposed to the *action*
  * tools (open_app, volume, window, file tools) that came before it.

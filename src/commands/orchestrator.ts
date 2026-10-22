@@ -19,8 +19,8 @@
  *          one call total UNLESS that tool is flagged
  *          `resultInformsNextStep`, in which case its result gets fed
  *          into the smart-tier loop below instead of being returned
- *          as-is — no current tool sets this flag, so today every
- *          fast-tier tool call is one-and-done), or
+ *          as-is — tools that return data or need a follow-up action set
+ *          this flag), or
  *        - calls `defer_to_planner`, handing off to the smart tier with
  *          nothing yet resolved.
  *   2. Once escalated (by defer, or by a resultInformsNextStep result),
@@ -145,7 +145,9 @@ export class Orchestrator extends EventEmitter {
     const maxSteps = opts.maxSteps ?? DEFAULT_MAX_STEPS;
     this.cancelled = false;
     const toolsUsed: string[] = [];
-    const messages: Message[] = [{ role: "user", content: text }];
+
+    const messages: Message[] = [];
+    messages.push({ role: "user", content: text });
 
     // --- Turn 1: fast tier, always ---
     this.emit("deciding", "fast");
@@ -177,14 +179,17 @@ export class Orchestrator extends EventEmitter {
 
     const tool = TOOLS[name];
     if (!tool?.resultInformsNextStep) {
-      // Fire-and-forget, as all current tools are — done, one call total.
+      // A genuinely self-contained action can return its own confirmation.
       this.emit("responding");
       return { reply: toolResult, toolsUsed, fastTierOnly: true, hitStepCap: false, cancelled: false };
     }
 
-    // Forward-looking path: no tool sets resultInformsNextStep today, so
-    // this branch isn't exercised yet, but the shape is here for when
-    // Milestone 10 adds a "check X" style tool. Feed the real result in
+    // Tools that return data or need a follow-up now set resultInformsNextStep
+    // (for example recall_facts, get_system_usage, write_file, get_emails,
+    // get_news, and browser_* tools) — this branch fires whenever
+    // the FAST tier itself confidently calls one of them directly (rather
+    // than deferring), so its raw result still gets a real composition
+    // pass instead of being read back verbatim. Feed the real result in
     // and let the smart tier decide what's next.
     messages.push({ role: "assistant", content: "", tool_calls: [{ function: { name, arguments: args } }] });
     messages.push({ role: "tool", tool_name: name, content: toolResult });

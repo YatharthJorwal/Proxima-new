@@ -21,6 +21,11 @@
  */
 
 import * as THREE from "./vendor/three.module.js";
+import { STLLoader } from "./vendor/loaders/STLLoader.js";
+import { OBJLoader } from "./vendor/loaders/OBJLoader.js";
+import { TransformControls } from "./vendor/controls/TransformControls.js";
+import { RoundedBoxGeometry } from "./vendor/geometries/RoundedBoxGeometry.js";
+import { ADDITION, SUBTRACTION, Brush, Evaluator } from "./vendor/three-bvh-csg.js";
 // Note: MediaPipe (HandLandmarker) is NOT imported statically here —
 // it's dynamic-imported inside setupCameraAndHandTracking() below, on
 // purpose. See that function's docblock for why.
@@ -29,6 +34,7 @@ import * as THREE from "./vendor/three.module.js";
 
 const statusDot = document.getElementById("statusDot");
 const hotkeyLabel = document.getElementById("hotkeyLabel");
+const clapStatus = document.getElementById("clapStatus");
 const clockEl = document.getElementById("clock");
 const log = document.getElementById("log");
 const logEmpty = document.getElementById("logEmpty");
@@ -37,6 +43,23 @@ const inputForm = document.getElementById("inputForm");
 const inputText = document.getElementById("inputText");
 const inputSend = document.getElementById("inputSend");
 const micBtn = document.getElementById("micBtn");
+
+// Milestone 15 fix: real-machine feedback was having no way to cut off a
+// long reply mid-speech (see tts.ts's stopSpeaking()) — this is the other
+// half, making that capability discoverable. The mic button already
+// triggers cancel() while busy (see the "/" shortcut and micBtn click
+// handler below), it just didn't LOOK like a stop control while busy.
+// Swapped for the whole turn (not just the listening sub-phase), since
+// cancel() now genuinely stops things at every stage: mid-tool-loop or
+// mid-speech.
+const MIC_ICON = "🎙︎";
+const STOP_ICON = "⏹";
+function setMicBusy(isBusy) {
+  micBtn.textContent = isBusy ? STOP_ICON : MIC_ICON;
+  micBtn.setAttribute("aria-label", isBusy ? "Stop" : "Talk (same as F9)");
+  micBtn.title = isBusy ? "Stop" : "Talk (same as F9)";
+  micBtn.classList.toggle("stoppable", isBusy);
+}
 const orbStage = document.getElementById("orbStage");
 const orbStateLabel = document.getElementById("orbStateLabel");
 const statusState = document.getElementById("statusState");
@@ -305,6 +328,524 @@ function animate() {
 }
 animate();
 
+// Milestone 20 starter CAD workspace: parametric primitives, orbit/zoom,
+// per-object uniform scaling, and ASCII STL export. No external model or
+// AI-generated geometry is implied by this local geometry editor.
+const modelCanvas = document.getElementById("modelCanvas");
+const modelScene = new THREE.Scene();
+modelScene.background = new THREE.Color(0x0b111b);
+const modelCamera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
+modelCamera.position.set(5, 4, 8);
+const modelRenderer = new THREE.WebGLRenderer({ canvas: modelCanvas, antialias: true, preserveDrawingBuffer: true });
+modelRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+const modelTransformGizmo = new TransformControls(modelCamera, modelRenderer.domElement);
+modelScene.add(modelTransformGizmo.getHelper());
+modelTransformGizmo.setMode("translate");
+modelScene.add(new THREE.HemisphereLight(0xbcd8ff, 0x18202d, 2));
+const modelLight = new THREE.DirectionalLight(0xffffff, 2.5);
+modelLight.position.set(5, 8, 6);
+modelScene.add(modelLight);
+const modelGrid = new THREE.GridHelper(20, 20, 0x42516a, 0x263247);
+modelScene.add(modelGrid);
+const modelMeshes = [];
+let selectedModel = null;
+let secondaryModel = null;
+let modelYaw = 0.6;
+let modelPitch = 0.4;
+let modelDistance = 10;
+let draggingModel = false;
+let lastModelPointer = null;
+const modelStatus = document.getElementById("modelStatus");
+const modelScale = document.getElementById("modelScale");
+const modelCornerRadius = document.getElementById("modelCornerRadius");
+const modelCornerRadiusRow = document.getElementById("modelCornerRadiusRow");
+const modelTransformFields = {
+  position: [document.getElementById("modelX"), document.getElementById("modelY"), document.getElementById("modelZ")],
+  rotation: [document.getElementById("modelRotX"), document.getElementById("modelRotY"), document.getElementById("modelRotZ")],
+  dimensions: [document.getElementById("modelDimX"), document.getElementById("modelDimY"), document.getElementById("modelDimZ")],
+};
+function syncModelTransformFields() {
+  if (!selectedModel) return;
+  [selectedModel.position.x, selectedModel.position.y, selectedModel.position.z].forEach((value, i) => { modelTransformFields.position[i].value = value.toFixed(2); });
+  [selectedModel.rotation.x, selectedModel.rotation.y, selectedModel.rotation.z].forEach((value, i) => { modelTransformFields.rotation[i].value = String(Math.round(THREE.MathUtils.radToDeg(value))); });
+  selectedModel.geometry.computeBoundingBox();
+  const dimensions = selectedModel.geometry.boundingBox.getSize(new THREE.Vector3()).multiply(selectedModel.scale);
+  [dimensions.x, dimensions.y, dimensions.z].forEach((value, i) => { modelTransformFields.dimensions[i].value = value.toFixed(2); });
+  const isRoundedBox = selectedModel.userData.kind === "rounded box";
+  modelCornerRadiusRow.classList.toggle("hidden", !isRoundedBox);
+  if (isRoundedBox) modelCornerRadius.value = Number(selectedModel.userData.cornerRadius || 0).toFixed(3);
+}
+function resizeModelCanvas() {
+  const width = modelCanvas.clientWidth || 1;
+  const height = modelCanvas.clientHeight || 1;
+  modelRenderer.setSize(width, height, false);
+  modelCamera.aspect = width / height;
+  modelCamera.updateProjectionMatrix();
+}
+window.addEventListener("resize", resizeModelCanvas);
+resizeModelCanvas();
+function updateModelCamera() {
+  modelCamera.position.set(
+    modelDistance * Math.cos(modelPitch) * Math.sin(modelYaw),
+    modelDistance * Math.sin(modelPitch),
+    modelDistance * Math.cos(modelPitch) * Math.cos(modelYaw),
+  );
+  modelCamera.lookAt(0, 0, 0);
+}
+function renderModelFrame() { requestAnimationFrame(renderModelFrame); modelRenderer.render(modelScene, modelCamera); }
+renderModelFrame();
+function addPrimitive(kind, config = null) {
+  const geometry = kind === "box" ? new THREE.BoxGeometry(1, 1, 1)
+    : kind === "sphere" ? new THREE.SphereGeometry(0.6, 24, 16)
+      : new THREE.CylinderGeometry(0.5, 0.5, 1, 24);
+  const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: 0x42c8bd, metalness: 0.15, roughness: 0.48 }));
+  if (config?.dimensions && [config.dimensions.x, config.dimensions.y, config.dimensions.z].every(Number.isFinite)) {
+    geometry.computeBoundingBox();
+    const base = geometry.boundingBox.getSize(new THREE.Vector3());
+    mesh.scale.set(config.dimensions.x / base.x, config.dimensions.y / base.y, config.dimensions.z / base.z);
+  }
+  if (config?.position && [config.position.x, config.position.y, config.position.z].every(Number.isFinite)) {
+    mesh.position.set(config.position.x, config.position.y, config.position.z);
+  } else {
+    mesh.position.set((modelMeshes.length % 3 - 1) * 1.5, 0.5, Math.floor(modelMeshes.length / 3) * 1.5);
+  }
+  if (config?.rotation && [config.rotation.x, config.rotation.y, config.rotation.z].every(Number.isFinite)) {
+    mesh.rotation.set(THREE.MathUtils.degToRad(config.rotation.x), THREE.MathUtils.degToRad(config.rotation.y), THREE.MathUtils.degToRad(config.rotation.z));
+  }
+  mesh.userData.kind = kind;
+  modelMeshes.push(mesh);
+  modelScene.add(mesh);
+  selectModel(mesh);
+}
+function roundSelectedBox(radius) {
+  if (!selectedModel || !["box", "rounded box"].includes(selectedModel.userData.kind)) return false;
+  selectedModel.geometry.computeBoundingBox();
+  const size = selectedModel.geometry.boundingBox.getSize(new THREE.Vector3());
+  const minDimension = Math.min(size.x, size.y, size.z);
+  if (!Number.isFinite(radius) || radius < 0.005 || radius > minDimension * 0.45) return false;
+  const oldGeometry = selectedModel.geometry;
+  selectedModel.geometry = new RoundedBoxGeometry(size.x, size.y, size.z, 4, radius);
+  selectedModel.userData.kind = "rounded box";
+  selectedModel.userData.cornerRadius = radius;
+  oldGeometry.dispose();
+  syncModelTransformFields();
+  return true;
+}
+function selectModel(mesh) {
+  if (selectedModel) selectedModel.material.emissive.setHex(0x000000);
+  if (secondaryModel) secondaryModel.material.emissive.setHex(0x000000);
+  secondaryModel = null;
+  selectedModel = mesh;
+  if (selectedModel) {
+    modelTransformGizmo.attach(selectedModel);
+    selectedModel.material.emissive.setHex(0x164d56);
+    modelScale.value = String(selectedModel.scale.x);
+    syncModelTransformFields();
+    modelStatus.textContent = `Selected ${selectedModel.userData.kind}. Shift-click another object for union/subtraction; drag the view to orbit.`;
+  } else {
+    modelTransformGizmo.detach();
+    modelCornerRadiusRow.classList.add("hidden");
+    modelStatus.textContent = "No object selected.";
+  }
+}
+modelTransformGizmo.addEventListener("objectChange", () => {
+  if (!selectedModel) return;
+  selectedModel.position.set(
+    THREE.MathUtils.clamp(selectedModel.position.x, -100, 100),
+    THREE.MathUtils.clamp(selectedModel.position.y, -100, 100),
+    THREE.MathUtils.clamp(selectedModel.position.z, -100, 100),
+  );
+  selectedModel.rotation.set(
+    THREE.MathUtils.clamp(selectedModel.rotation.x, THREE.MathUtils.degToRad(-360), THREE.MathUtils.degToRad(360)),
+    THREE.MathUtils.clamp(selectedModel.rotation.y, THREE.MathUtils.degToRad(-360), THREE.MathUtils.degToRad(360)),
+    THREE.MathUtils.clamp(selectedModel.rotation.z, THREE.MathUtils.degToRad(-360), THREE.MathUtils.degToRad(360)),
+  );
+  selectedModel.geometry.computeBoundingBox();
+  const baseDimensions = selectedModel.geometry.boundingBox.getSize(new THREE.Vector3());
+  for (let axis = 0; axis < 3; axis++) {
+    const baseLength = baseDimensions.getComponent(axis);
+    if (baseLength > 0) {
+      const minScale = Math.max(0.000001, 0.000001 / baseLength);
+      const maxScale = Math.min(1_000_000_000, 1000 / baseLength);
+      selectedModel.scale.setComponent(axis, THREE.MathUtils.clamp(Math.abs(selectedModel.scale.getComponent(axis)), minScale, maxScale));
+    }
+  }
+  modelScale.value = String(THREE.MathUtils.clamp(selectedModel.scale.x, Number(modelScale.min), Number(modelScale.max)));
+  syncModelTransformFields();
+});
+for (const [id, mode] of [["modelMoveMode", "translate"], ["modelRotateMode", "rotate"], ["modelScaleMode", "scale"]]) {
+  const button = document.getElementById(id);
+  button.addEventListener("click", () => {
+    modelTransformGizmo.setMode(mode);
+    for (const candidate of document.querySelectorAll(".model-gizmo-mode")) candidate.setAttribute("aria-pressed", String(candidate === button));
+    modelStatus.textContent = `${mode[0].toUpperCase()}${mode.slice(1)} gizmo active. Drag a colored axis to edit the selected object.`;
+  });
+}
+document.getElementById("addBoxBtn").addEventListener("click", () => addPrimitive("box"));
+document.getElementById("addSphereBtn").addEventListener("click", () => addPrimitive("sphere"));
+document.getElementById("addCylinderBtn").addEventListener("click", () => addPrimitive("cylinder"));
+const modelFileInput = document.getElementById("modelFileInput");
+document.getElementById("importModelBtn").addEventListener("click", () => modelFileInput.click());
+modelFileInput.addEventListener("change", async () => {
+  const file = modelFileInput.files?.[0];
+  if (!file) return;
+  if (file.size > 50 * 1024 * 1024) { modelStatus.textContent = "For now, imported model files must be 50 MB or smaller."; modelFileInput.value = ""; return; }
+  modelStatus.textContent = `Importing ${file.name}…`;
+  try {
+    const extension = file.name.split(".").pop()?.toLowerCase();
+    if (extension === "stl") {
+      const geometry = new STLLoader().parse(await file.arrayBuffer());
+      geometry.computeVertexNormals();
+      const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: 0x42c8bd, metalness: 0.1, roughness: 0.55 }));
+      mesh.userData.kind = `STL ${file.name}`;
+      const bounds = new THREE.Box3().setFromObject(mesh);
+      mesh.position.sub(bounds.getCenter(new THREE.Vector3()));
+      modelMeshes.push(mesh); modelScene.add(mesh); selectModel(mesh);
+    } else if (extension === "obj") {
+      const group = new OBJLoader().parse(await file.text());
+      const bounds = new THREE.Box3().setFromObject(group);
+      group.position.sub(bounds.getCenter(new THREE.Vector3()));
+      group.updateMatrixWorld(true);
+      const imported = [];
+      group.traverse((child) => {
+        if (!child.isMesh) return;
+        const geometry = child.geometry.clone().applyMatrix4(child.matrixWorld);
+        geometry.computeVertexNormals();
+        const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: 0x42c8bd, metalness: 0.1, roughness: 0.55 }));
+        mesh.userData.kind = `OBJ ${file.name}`;
+        imported.push(mesh);
+      });
+      for (const mesh of imported) { modelMeshes.push(mesh); modelScene.add(mesh); }
+      selectModel(imported[0] || null);
+    } else {
+      modelStatus.textContent = "Choose an STL or OBJ file.";
+      return;
+    }
+    modelStatus.textContent = `Imported ${file.name}. Geometry is centered; OBJ materials are not imported.`;
+  } catch (error) {
+    modelStatus.textContent = `Could not import ${file.name}: ${error instanceof Error ? error.message : "invalid model"}`;
+  } finally {
+    modelFileInput.value = "";
+  }
+});
+document.getElementById("deleteModelBtn").addEventListener("click", () => {
+  if (!selectedModel) return;
+  modelScene.remove(selectedModel);
+  selectedModel.geometry.dispose(); selectedModel.material.dispose();
+  modelMeshes.splice(modelMeshes.indexOf(selectedModel), 1);
+  if (secondaryModel) secondaryModel.material.emissive.setHex(0x000000);
+  secondaryModel = null;
+  selectModel(null);
+});
+function combineSelectedModels(operation, label) {
+  if (!selectedModel || !secondaryModel || selectedModel === secondaryModel) {
+    modelStatus.textContent = "Select one object, then Shift-click a second object to combine them.";
+    return;
+  }
+  const triangleCount = (mesh) => (mesh.geometry.index?.count ?? mesh.geometry.getAttribute("position")?.count ?? 0) / 3;
+  if (triangleCount(selectedModel) + triangleCount(secondaryModel) > 80_000) {
+    modelStatus.textContent = "Boolean operations are limited to 80,000 input triangles to keep the workspace responsive.";
+    return;
+  }
+  const makeBrush = (mesh) => {
+    const brush = new Brush(mesh.geometry.clone(), new THREE.MeshStandardMaterial({ color: 0x42c8bd, metalness: 0.1, roughness: 0.55 }));
+    brush.position.copy(mesh.position);
+    brush.quaternion.copy(mesh.quaternion);
+    brush.scale.copy(mesh.scale);
+    brush.updateMatrixWorld(true);
+    return brush;
+  };
+  const brushA = makeBrush(selectedModel);
+  const brushB = makeBrush(secondaryModel);
+  try {
+    const evaluator = new Evaluator();
+    evaluator.useGroups = false;
+    const result = evaluator.evaluate(brushA, brushB, operation);
+    result.userData.kind = label;
+    result.material = new THREE.MeshStandardMaterial({ color: 0x42c8bd, metalness: 0.1, roughness: 0.55 });
+    modelScene.remove(selectedModel, secondaryModel);
+    selectedModel.geometry.dispose(); selectedModel.material.dispose();
+    secondaryModel.geometry.dispose(); secondaryModel.material.dispose();
+    modelMeshes.splice(modelMeshes.indexOf(selectedModel), 1, result);
+    modelMeshes.splice(modelMeshes.indexOf(secondaryModel), 1);
+    modelScene.add(result);
+    selectedModel = result;
+    secondaryModel = null;
+    selectModel(result);
+    modelStatus.textContent = `${label} complete. Boolean results require watertight, non-intersecting input meshes for reliable geometry.`;
+  } catch (error) {
+    modelStatus.textContent = `Boolean operation failed: ${error instanceof Error ? error.message : "unsupported geometry"}. Try closed primitive meshes.`;
+  } finally {
+    brushA.geometry.dispose(); brushA.material.dispose();
+    brushB.geometry.dispose(); brushB.material.dispose();
+  }
+}
+document.getElementById("unionModelBtn").addEventListener("click", () => combineSelectedModels(ADDITION, "Union"));
+document.getElementById("subtractModelBtn").addEventListener("click", () => combineSelectedModels(SUBTRACTION, "Subtraction"));
+const measureModelBtn = document.getElementById("measureModelBtn");
+const modelMetrics = document.getElementById("modelMetrics");
+measureModelBtn.addEventListener("click", () => {
+  if (!selectedModel) { modelMetrics.textContent = "Select an object to measure."; return; }
+  selectedModel.updateMatrixWorld(true);
+  const geometry = selectedModel.geometry;
+  const position = geometry.getAttribute("position");
+  const index = geometry.index;
+  const total = index ? index.count : position.count;
+  const start = geometry.drawRange.start;
+  const count = Math.min(total, geometry.drawRange.count);
+  const triangles = Math.floor(count / 3);
+  const size = new THREE.Box3().setFromObject(selectedModel).getSize(new THREE.Vector3());
+  let volumeText = "Volume estimate skipped for meshes over 120,000 triangles.";
+  let topologyText = "Topology check skipped for meshes over 120,000 triangles.";
+  if (triangles <= 120_000) {
+    const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+    let signedVolume = 0;
+    const diagnosticScale = Math.max(size.x, size.y, size.z, 1e-6);
+    const weldTolerance = diagnosticScale * 1e-7;
+    const degenerateAreaSquaredLimit = diagnosticScale ** 4 * 1e-20;
+    const vertexIds = new Map();
+    const edges = new Map();
+    const firstTriangleAtVertex = new Map();
+    const parents = new Int32Array(triangles);
+    for (let i = 0; i < triangles; i++) parents[i] = i;
+    const findRoot = (item) => {
+      let root = item;
+      while (parents[root] !== root) root = parents[root];
+      while (parents[item] !== item) { const next = parents[item]; parents[item] = root; item = next; }
+      return root;
+    };
+    const unionTriangles = (left, right) => {
+      const aRoot = findRoot(left), bRoot = findRoot(right);
+      if (aRoot !== bRoot) parents[bRoot] = aRoot;
+    };
+    const vertexId = (attributeIndex) => {
+      const x = Math.round(position.getX(attributeIndex) / weldTolerance);
+      const y = Math.round(position.getY(attributeIndex) / weldTolerance);
+      const z = Math.round(position.getZ(attributeIndex) / weldTolerance);
+      const key = `${x},${y},${z}`;
+      let id = vertexIds.get(key);
+      if (id === undefined) { id = vertexIds.size; vertexIds.set(key, id); }
+      return id;
+    };
+    let degenerateTriangles = 0;
+    for (let i = start; i + 2 < start + count; i += 3) {
+      const ia = index ? index.getX(i) : i;
+      const ib = index ? index.getX(i + 1) : i + 1;
+      const ic = index ? index.getX(i + 2) : i + 2;
+      a.fromBufferAttribute(position, ia).applyMatrix4(selectedModel.matrixWorld);
+      b.fromBufferAttribute(position, ib).applyMatrix4(selectedModel.matrixWorld);
+      c.fromBufferAttribute(position, ic).applyMatrix4(selectedModel.matrixWorld);
+      signedVolume += a.dot(b.clone().cross(c)) / 6;
+      const area2 = b.clone().sub(a).cross(c.clone().sub(a)).lengthSq();
+      if (!Number.isFinite(area2) || area2 <= degenerateAreaSquaredLimit) degenerateTriangles++;
+      const currentTriangle = Math.floor((i - start) / 3);
+      const ids = [vertexId(ia), vertexId(ib), vertexId(ic)];
+      for (const id of ids) {
+        const previous = firstTriangleAtVertex.get(id);
+        if (previous === undefined) firstTriangleAtVertex.set(id, currentTriangle);
+        else unionTriangles(previous, currentTriangle);
+      }
+      for (let edge = 0; edge < 3; edge++) {
+        const from = ids[edge], to = ids[(edge + 1) % 3];
+        const low = Math.min(from, to), high = Math.max(from, to);
+        const key = `${low}:${high}`;
+        const record = edges.get(key) || { uses: 0, directionBalance: 0 };
+        record.uses++;
+        record.directionBalance += from === low ? 1 : -1;
+        edges.set(key, record);
+      }
+    }
+    volumeText = `Signed-mesh volume magnitude estimate: ${Math.abs(signedVolume).toFixed(3)} scene units³ (meaningful only for closed, consistently oriented geometry).`;
+    let boundaryEdges = 0, nonManifoldEdges = 0, windingMismatches = 0;
+    for (const edge of edges.values()) {
+      if (edge.uses === 1) boundaryEdges++;
+      else if (edge.uses > 2) nonManifoldEdges++;
+      else if (edge.directionBalance !== 0) windingMismatches++;
+    }
+    const components = new Set(Array.from({ length: triangles }, (_, item) => findRoot(item))).size;
+    const closed = boundaryEdges === 0 && nonManifoldEdges === 0;
+    const manifoldText = closed ? "no boundary or non-manifold edges" : `${boundaryEdges} boundary and ${nonManifoldEdges} non-manifold edges`;
+    const windingText = windingMismatches ? `${windingMismatches} shared edges have inconsistent face winding` : "shared edge winding is consistent";
+    topologyText = `Topology diagnostic: ${manifoldText}; ${windingText}; ${degenerateTriangles} degenerate triangles; ${components} connected component(s).`;
+  }
+  modelMetrics.textContent = `Bounds: ${size.x.toFixed(3)} × ${size.y.toFixed(3)} × ${size.z.toFixed(3)} scene units · ${triangles.toLocaleString()} triangles. ${volumeText} ${topologyText} These geometry diagnostics do not certify printability or wall thickness.`;
+});
+modelScale.addEventListener("input", () => {
+  if (!selectedModel) return;
+  selectedModel.scale.setScalar(Number(modelScale.value));
+  syncModelTransformFields();
+});
+for (let i = 0; i < 3; i++) {
+  modelTransformFields.position[i].addEventListener("input", () => {
+    if (!selectedModel) return;
+    const raw = Number(modelTransformFields.position[i].value);
+    const value = THREE.MathUtils.clamp(Number.isFinite(raw) ? raw : 0, -100, 100);
+    selectedModel.position.setComponent(i, value);
+    modelTransformFields.position[i].value = String(value);
+  });
+  modelTransformFields.rotation[i].addEventListener("input", () => {
+    if (!selectedModel) return;
+    const raw = Number(modelTransformFields.rotation[i].value);
+    const degrees = THREE.MathUtils.clamp(Number.isFinite(raw) ? raw : 0, -360, 360);
+    selectedModel.rotation["xyz"[i]] = THREE.MathUtils.degToRad(degrees);
+    modelTransformFields.rotation[i].value = String(degrees);
+  });
+  modelTransformFields.dimensions[i].addEventListener("change", () => {
+    if (!selectedModel) return;
+    const requested = Number(modelTransformFields.dimensions[i].value);
+    if (!Number.isFinite(requested) || requested <= 0 || requested > 1000) { syncModelTransformFields(); return; }
+    selectedModel.geometry.computeBoundingBox();
+    const baseSize = selectedModel.geometry.boundingBox.getSize(new THREE.Vector3());
+    const baseAxis = baseSize.getComponent(i);
+    if (baseAxis <= 0) { syncModelTransformFields(); return; }
+    selectedModel.scale.setComponent(i, requested / baseAxis);
+    syncModelTransformFields();
+  });
+}
+modelCornerRadius.addEventListener("change", () => {
+  const radius = Number(modelCornerRadius.value);
+  if (!roundSelectedBox(radius)) {
+    syncModelTransformFields();
+    modelStatus.textContent = "Corner radius must be positive and no more than 45% of the box's shortest side.";
+    return;
+  }
+  modelStatus.textContent = "Corner radius updated. Review the rounded box before export.";
+});
+modelCanvas.addEventListener("pointerdown", (event) => {
+  if (modelTransformGizmo.dragging) return;
+  const rect = modelCanvas.getBoundingClientRect();
+  const ray = new THREE.Raycaster();
+  ray.setFromCamera(new THREE.Vector2((event.clientX - rect.left) / rect.width * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1), modelCamera);
+  const hit = ray.intersectObjects(modelMeshes)[0];
+  if (hit && event.shiftKey && selectedModel && hit.object !== selectedModel) {
+    if (secondaryModel) secondaryModel.material.emissive.setHex(0x000000);
+    secondaryModel = hit.object;
+    secondaryModel.material.emissive.setHex(0x6b4b1c);
+    modelStatus.textContent = "Two objects selected. Choose Union or Subtract second.";
+  } else if (hit) selectModel(hit.object);
+  draggingModel = true; lastModelPointer = { x: event.clientX, y: event.clientY };
+  modelCanvas.setPointerCapture(event.pointerId);
+});
+modelCanvas.addEventListener("pointermove", (event) => {
+  if (modelTransformGizmo.dragging) return;
+  if (!draggingModel || !lastModelPointer) return;
+  modelYaw -= (event.clientX - lastModelPointer.x) * 0.009;
+  modelPitch = Math.max(-1.35, Math.min(1.35, modelPitch + (event.clientY - lastModelPointer.y) * 0.009));
+  lastModelPointer = { x: event.clientX, y: event.clientY };
+  updateModelCamera();
+});
+modelCanvas.addEventListener("pointerup", () => { draggingModel = false; lastModelPointer = null; });
+modelCanvas.addEventListener("wheel", (event) => { event.preventDefault(); modelDistance = Math.max(3, Math.min(30, modelDistance + Math.sign(event.deltaY) * 0.7)); updateModelCamera(); }, { passive: false });
+document.getElementById("exportStlBtn").addEventListener("click", () => {
+  if (!modelMeshes.length) { modelStatus.textContent = "Add a primitive before exporting."; return; }
+  const sceneUnit = document.getElementById("modelStlUnit").value;
+  const sceneUnitToMillimeters = { mm: 1, cm: 10, in: 25.4 }[sceneUnit] || 1;
+  const triangles = [];
+  let tooLarge = false;
+  const vA = new THREE.Vector3(), vB = new THREE.Vector3(), vC = new THREE.Vector3();
+  for (const mesh of modelMeshes) {
+    mesh.updateMatrixWorld(true);
+    const position = mesh.geometry.getAttribute("position");
+    const index = mesh.geometry.index;
+    const count = Math.min(index ? index.count : position.count, mesh.geometry.drawRange.count);
+    const start = mesh.geometry.drawRange.start;
+    for (let i = start; i < start + count; i += 3) {
+      if (triangles.length >= 500_000) { tooLarge = true; break; }
+      const a = index ? index.getX(i) : i, b = index ? index.getX(i + 1) : i + 1, c = index ? index.getX(i + 2) : i + 2;
+      vA.fromBufferAttribute(position, a).applyMatrix4(mesh.matrixWorld);
+      vB.fromBufferAttribute(position, b).applyMatrix4(mesh.matrixWorld);
+      vC.fromBufferAttribute(position, c).applyMatrix4(mesh.matrixWorld);
+      vA.multiplyScalar(sceneUnitToMillimeters);
+      vB.multiplyScalar(sceneUnitToMillimeters);
+      vC.multiplyScalar(sceneUnitToMillimeters);
+      const normal = vB.clone().sub(vA).cross(vC.clone().sub(vA)).normalize();
+      triangles.push(`facet normal ${normal.x} ${normal.y} ${normal.z}\n outer loop\n  vertex ${vA.x} ${vA.y} ${vA.z}\n  vertex ${vB.x} ${vB.y} ${vB.z}\n  vertex ${vC.x} ${vC.y} ${vC.z}\n endloop\nendfacet`);
+    }
+    if (tooLarge) break;
+  }
+  if (tooLarge) { modelStatus.textContent = "This model is too detailed for ASCII STL export here. Simplify it to fewer than 500,000 triangles first."; return; }
+  const blob = new Blob([`solid proxima\n${triangles.join("\n")}\nendsolid proxima`], { type: "model/stl" });
+  const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "proxima-model.stl"; link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  modelStatus.textContent = `Exported ${modelMeshes.length} object(s). STL coordinates were converted using 1 scene unit = ${sceneUnit === "in" ? "1 inch (25.4 mm)" : sceneUnit === "cm" ? "1 cm (10 mm)" : "1 mm"}. STL does not store units; coordinates are now in millimeters.`;
+});
+const modelEditPrompt = document.getElementById("modelEditPrompt");
+const applyModelEditBtn = document.getElementById("applyModelEditBtn");
+applyModelEditBtn.addEventListener("click", async () => {
+  const prompt = modelEditPrompt.value.trim();
+  if (!prompt) { modelStatus.textContent = "Describe the transform change first."; return; }
+  applyModelEditBtn.disabled = true;
+  modelStatus.textContent = selectedModel ? "Asking the local model for a transform…" : "Asking the local model for a supported primitive…";
+  try {
+    const current = selectedModel ? {
+      position: { x: selectedModel.position.x, y: selectedModel.position.y, z: selectedModel.position.z },
+      rotation: {
+        x: THREE.MathUtils.radToDeg(selectedModel.rotation.x),
+        y: THREE.MathUtils.radToDeg(selectedModel.rotation.y),
+        z: THREE.MathUtils.radToDeg(selectedModel.rotation.z),
+      },
+      scale: { x: selectedModel.scale.x, y: selectedModel.scale.y, z: selectedModel.scale.z },
+      dimensions: (() => {
+        selectedModel.geometry.computeBoundingBox();
+        const size = selectedModel.geometry.boundingBox.getSize(new THREE.Vector3()).multiply(selectedModel.scale);
+        return { x: size.x, y: size.y, z: size.z };
+      })(),
+      geometryDimensions: (() => {
+        selectedModel.geometry.computeBoundingBox();
+        const size = selectedModel.geometry.boundingBox.getSize(new THREE.Vector3());
+        return { x: size.x, y: size.y, z: size.z };
+      })(),
+    } : null;
+    const result = await window.proxy.editModelTransform({ prompt, kind: selectedModel?.userData.kind, sceneUnit: document.getElementById("modelStlUnit").value, current });
+    if (Array.isArray(result?.createObjects)) {
+      for (const object of result.createObjects) {
+        if (!["box", "sphere", "cylinder"].includes(object?.kind)
+          || ![object?.dimensions?.x, object?.dimensions?.y, object?.dimensions?.z,
+            object?.position?.x, object?.position?.y, object?.position?.z,
+            object?.rotation?.x, object?.rotation?.y, object?.rotation?.z].every(Number.isFinite)) {
+          modelStatus.textContent = "The local model returned an invalid assembly; nothing was added.";
+          return;
+        }
+      }
+      for (const object of result.createObjects) addPrimitive(object.kind, object);
+      modelStatus.textContent = `Added ${result.createObjects.length} supported primitive(s). Adjust and review the assembly before export.`;
+      return;
+    }
+    if (result?.geometryEdit?.kind === "rounded-box") {
+      if (!roundSelectedBox(result.geometryEdit.radius)) { modelStatus.textContent = "That radius cannot be applied to this box; the object was not changed."; return; }
+      modelStatus.textContent = `Rounded box corners applied with radius ${result.geometryEdit.radius.toFixed(2)} scene units. Review before export.`;
+      return;
+    }
+    if (!result?.transform) { modelStatus.textContent = result?.error || "No transform was returned; the object was not changed."; return; }
+    const { position, rotation, scale } = result.transform;
+    if (![position?.x, position?.y, position?.z, rotation?.x, rotation?.y, rotation?.z, scale?.x, scale?.y, scale?.z].every(Number.isFinite)) {
+      modelStatus.textContent = "The local model returned an invalid transform; the object was not changed.";
+      return;
+    }
+    selectedModel.position.set(position.x, position.y, position.z);
+    selectedModel.rotation.set(THREE.MathUtils.degToRad(rotation.x), THREE.MathUtils.degToRad(rotation.y), THREE.MathUtils.degToRad(rotation.z));
+    selectedModel.scale.set(scale.x, scale.y, scale.z);
+    modelScale.value = String(THREE.MathUtils.clamp(scale.x, Number(modelScale.min), Number(modelScale.max)));
+    syncModelTransformFields();
+    modelStatus.textContent = "Transform applied. Scene units are arbitrary; review the result before export.";
+  } catch { modelStatus.textContent = "Local transform editing is unavailable."; }
+  finally { applyModelEditBtn.disabled = false; }
+});
+const analyzeModelBtn = document.getElementById("analyzeModelBtn");
+const modelAnalysis = document.getElementById("modelAnalysis");
+analyzeModelBtn.addEventListener("click", async () => {
+  if (!modelMeshes.length) { modelAnalysis.textContent = "Add or import geometry first."; return; }
+  analyzeModelBtn.disabled = true;
+  modelAnalysis.textContent = "Sending this preview to the local smart model…";
+  try {
+    const image = modelCanvas.toDataURL("image/png").split(",")[1];
+    const result = await window.proxy.analyzeModelPreview(image);
+    modelAnalysis.textContent = result?.text || result?.error || "No description returned.";
+  } catch { modelAnalysis.textContent = "Local vision analysis is unavailable."; }
+  finally { analyzeModelBtn.disabled = false; }
+});
+updateModelCamera();
+
 // ================================================================
 // Log
 // ================================================================
@@ -364,6 +905,51 @@ clearLogBtn.addEventListener("click", async () => {
   log.appendChild(logEmpty);
   window.proxy.clearLog();
   inputText.focus();
+});
+
+const memoryList = document.getElementById("memoryList");
+const refreshMemoryBtn = document.getElementById("refreshMemoryBtn");
+const clearMemoryBtn = document.getElementById("clearMemoryBtn");
+async function refreshMemoryPanel() {
+  refreshMemoryBtn.disabled = true;
+  memoryList.textContent = "Loading saved facts…";
+  try {
+    const result = await window.proxy.getMemory();
+    memoryList.replaceChildren();
+    if (!Array.isArray(result)) {
+      memoryList.textContent = result?.error || "Saved memory is unavailable.";
+      return;
+    }
+    if (!result.length) {
+      memoryList.textContent = "No saved facts yet.";
+      return;
+    }
+    for (const fact of result) {
+      const row = document.createElement("div");
+      row.className = "memory-item";
+      row.textContent = typeof fact?.text === "string" ? fact.text : "Saved item";
+      memoryList.appendChild(row);
+    }
+  } catch {
+    memoryList.textContent = "Saved memory is unavailable.";
+  } finally {
+    refreshMemoryBtn.disabled = false;
+  }
+}
+refreshMemoryBtn.addEventListener("click", refreshMemoryPanel);
+clearMemoryBtn.addEventListener("click", async () => {
+  const confirmed = await showConfirm("Forget all saved facts? This cannot be undone.", "Forget all");
+  if (!confirmed) return;
+  clearMemoryBtn.disabled = true;
+  try {
+    const result = await window.proxy.clearMemory();
+    if (result?.ok) await refreshMemoryPanel();
+    else memoryList.textContent = "Could not clear saved memory.";
+  } catch {
+    memoryList.textContent = "Could not clear saved memory.";
+  } finally {
+    clearMemoryBtn.disabled = false;
+  }
 });
 
 // Milestone 13 — opts.timestamp (an ISO string) lets hydrated history
@@ -438,6 +1024,9 @@ window.proxy.on("ready", (payload) => {
   statusState.textContent = "Ready";
   startedAt = Date.now();
 });
+window.proxy.on("activation", (payload) => {
+  clapStatus.textContent = payload?.listening ? "double-clap: listening" : payload?.paused ? "double-clap: paused" : payload?.enabled ? "double-clap: unavailable" : "double-clap: off";
+});
 
 window.proxy.on("listening", (info) => {
   // Milestone 8 (VAD): there's no fixed recording length anymore, so
@@ -453,6 +1042,7 @@ window.proxy.on("listening", (info) => {
   setOrbState("listening");
   micBtn.classList.add("listening");
   micBtn.setAttribute("aria-pressed", "true");
+  setMicBusy(true);
   appendLog("status", `listening (auto-stops after a pause, max ${Math.round(info.maxMs / 1000)}s)`);
   outputBox.innerHTML = '<span class="output-empty">Listening…</span>';
 });
@@ -489,6 +1079,7 @@ window.proxy.on("transcribed", (text) => {
     turnInProgress = true;
     resetActivityPanel();
     showActivityPanel();
+    setMicBusy(true);
   } else {
     resolveActivityRow(currentRow, { sub: truncate(text, 60) });
   }
@@ -594,6 +1185,7 @@ window.proxy.on("idle", () => {
   statusDot.classList.remove("active");
   micBtn.classList.remove("listening");
   micBtn.setAttribute("aria-pressed", "false");
+  setMicBusy(false);
   resolveActivityRow(currentRow); // safety net - nothing should normally still be open here
   statusState.textContent = "Ready";
   if (!errorFlashTimeout) setOrbState("idle");
@@ -605,6 +1197,149 @@ window.proxy.on("error", (message) => {
   resolveActivityRow(currentRow, { stopped: true, sub: truncate(message, 70) });
   flashError(message);
   appendLog("error", message);
+});
+
+// Milestone 19 Part B — this panel renders only samples returned by the
+// Windows query. Missing samples are an explicit unavailable state, never
+// zero-valued placeholder metrics.
+const monitorCpuValue = document.getElementById("monitorCpuValue");
+const monitorCpuFill = document.getElementById("monitorCpuFill");
+const monitorMemoryValue = document.getElementById("monitorMemoryValue");
+const monitorMemoryFill = document.getElementById("monitorMemoryFill");
+const monitorTopMemory = document.getElementById("monitorTopMemory");
+const monitorTopCpu = document.getElementById("monitorTopCpu");
+const monitorUpdated = document.getElementById("monitorUpdated");
+
+function setMonitorUnavailable() {
+  monitorCpuValue.textContent = "Unavailable";
+  monitorMemoryValue.textContent = "Unavailable";
+  monitorCpuFill.style.width = "0%";
+  monitorMemoryFill.style.width = "0%";
+  monitorTopMemory.textContent = "Unavailable";
+  monitorTopCpu.textContent = "Unavailable";
+  monitorUpdated.textContent = "No sample";
+}
+
+function renderProcessList(target, processes, valueKey, suffix) {
+  target.replaceChildren();
+  if (!Array.isArray(processes) || processes.length === 0) {
+    target.textContent = "No process data";
+    return;
+  }
+  for (const process of processes.slice(0, 3)) {
+    const row = document.createElement("div");
+    row.className = "monitor-process-row";
+    const name = document.createElement("span");
+    name.textContent = String(process.name);
+    const value = document.createElement("span");
+    value.textContent = `${process[valueKey]}${suffix}`;
+    row.append(name, value);
+    target.appendChild(row);
+  }
+}
+
+window.proxy.on("system-usage", (usage) => {
+  if (!usage || typeof usage !== "object") {
+    setMonitorUnavailable();
+    return;
+  }
+  const cpu = Number(usage.cpuPercent);
+  const memory = Number(usage.usedMemPercent);
+  if (!Number.isFinite(cpu) || !Number.isFinite(memory)) {
+    setMonitorUnavailable();
+    return;
+  }
+  const boundedCpu = Math.max(0, Math.min(100, cpu));
+  const boundedMemory = Math.max(0, Math.min(100, memory));
+  monitorCpuValue.textContent = `${cpu.toFixed(1)}%`;
+  monitorCpuFill.style.width = `${boundedCpu}%`;
+  monitorMemoryValue.textContent = `${memory.toFixed(1)}% (${usage.usedMemMB} / ${usage.totalMemMB} MB)`;
+  monitorMemoryFill.style.width = `${boundedMemory}%`;
+  renderProcessList(monitorTopMemory, usage.topByMemory, "memMB", " MB");
+  renderProcessList(monitorTopCpu, usage.topByCpuTime, "cpuSeconds", " s");
+  monitorUpdated.textContent = `Updated ${new Date().toLocaleTimeString([], { hour12: false })}`;
+});
+
+const presentDeviceList = document.getElementById("presentDeviceList");
+window.proxy.on("present-devices", (devices) => {
+  presentDeviceList.replaceChildren();
+  if (!Array.isArray(devices)) {
+    presentDeviceList.textContent = "Windows device inventory unavailable";
+    return;
+  }
+  if (devices.length === 0) {
+    presentDeviceList.textContent = "No Bluetooth or audio devices detected";
+    return;
+  }
+  for (const device of devices.slice(0, 8)) {
+    const row = document.createElement("div");
+    row.className = "monitor-process-row";
+    const name = document.createElement("span");
+    name.textContent = String(device.name);
+    const state = document.createElement("span");
+    state.textContent = `${device.kind} · ${device.status}`;
+    row.append(name, state);
+    presentDeviceList.appendChild(row);
+  }
+});
+
+// Location is only requested after this explicit user action. The tiles
+// are requested from OpenStreetMap for the current viewport; the provider
+// can therefore infer the area being viewed, as disclosed in the UI.
+const mapLocationBtn = document.getElementById("mapLocationBtn");
+const mapStatus = document.getElementById("mapStatus");
+const mapTiles = document.getElementById("mapTiles");
+function showMapAt(latitude, longitude) {
+  const zoom = 14;
+  const scale = 2 ** zoom;
+  const x = Math.floor(((longitude + 180) / 360) * scale);
+  const latRad = latitude * Math.PI / 180;
+  const y = Math.floor((1 - Math.asinh(Math.tan(latRad)) / Math.PI) / 2 * scale);
+  mapTiles.replaceChildren();
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+    const tileX = (x + dx + scale) % scale;
+    const tileY = Math.max(0, Math.min(scale - 1, y + dy));
+    const img = document.createElement("img");
+    img.alt = "";
+    img.loading = "lazy";
+    img.src = `https://tile.openstreetmap.org/${zoom}/${tileX}/${tileY}.png`;
+    mapTiles.appendChild(img);
+  }
+  mapStatus.textContent = `Map centered near ${latitude.toFixed(3)}, ${longitude.toFixed(3)}.`;
+}
+mapLocationBtn.addEventListener("click", () => {
+  if (!navigator.geolocation) { mapStatus.textContent = "Location is unavailable in this runtime."; return; }
+  mapStatus.textContent = "Waiting for location permission…";
+  navigator.geolocation.getCurrentPosition(
+    ({ coords }) => showMapAt(coords.latitude, coords.longitude),
+    (error) => { mapStatus.textContent = error.code === error.PERMISSION_DENIED ? "Location permission denied." : "Could not get current location."; },
+    { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 },
+  );
+});
+
+const newsRefreshBtn = document.getElementById("newsRefreshBtn");
+const newsStatus = document.getElementById("newsStatus");
+const newsList = document.getElementById("newsList");
+newsRefreshBtn.addEventListener("click", async () => {
+  newsRefreshBtn.disabled = true;
+  newsStatus.textContent = "Loading current feeds…";
+  try {
+    const result = await window.proxy.fetchNews();
+    newsList.replaceChildren();
+    if (!Array.isArray(result)) { newsStatus.textContent = result?.error || "News is unavailable."; return; }
+    if (!result.length) { newsStatus.textContent = "No headlines matched. Clear or adjust News interests in Settings."; return; }
+    newsStatus.textContent = `${result.length} current headlines`;
+    for (const item of result) {
+      const row = document.createElement("a");
+      row.className = "news-item";
+      row.href = item.link;
+      row.target = "_blank";
+      row.rel = "noreferrer";
+      row.textContent = `${item.title} · ${item.source}`;
+      newsList.appendChild(row);
+    }
+  } catch { newsStatus.textContent = "News feeds are unavailable right now."; }
+  finally { newsRefreshBtn.disabled = false; }
 });
 
 // ================================================================
@@ -642,12 +1377,16 @@ const cameraOnBtn = document.getElementById("cameraOnBtn");
 const cameraOffBtn = document.getElementById("cameraOffBtn");
 const cameraStateTag = document.getElementById("cameraStateTag");
 const handTrackingToggle = document.getElementById("handTrackingToggle");
+const gestureTriggerToggle = document.getElementById("gestureTriggerToggle");
 
 let cameraStream = null;
 let HandLandmarkerCls = null; // holds the class itself, for its static HAND_CONNECTIONS
 let handLandmarker = null;
 let handTrackingOn = false;
 let handLoopRunning = false;
+let gestureTriggerOn = false;
+let gestureTriggerArmed = true;
+let lastGestureTriggerAt = 0;
 
 function resizeCameraOverlay() {
   cameraOverlay.width = cameraOverlay.clientWidth;
@@ -713,7 +1452,23 @@ function handLoop() {
   }
   drawHands(result);
   const count = result.landmarks.length;
-  cameraStatus.textContent = count === 0 ? "No hand detected" : `${count} hand${count > 1 ? "s" : ""} detected`;
+  if (gestureTriggerOn && count > 0) {
+    const hand = result.landmarks[0];
+    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+    const palmScale = dist(hand[0], hand[9]);
+    const isPinch = palmScale > 0 && dist(hand[4], hand[8]) / palmScale < 0.28;
+    const now = performance.now();
+    if (isPinch && gestureTriggerArmed && now - lastGestureTriggerAt > 1200) {
+      gestureTriggerArmed = false;
+      lastGestureTriggerAt = now;
+      window.proxy.triggerVoice();
+    } else if (!isPinch) {
+      gestureTriggerArmed = true;
+    }
+    cameraStatus.textContent = count === 0 ? "No hand detected" : `${count} hand${count > 1 ? "s" : ""} detected · pinch to start or stop voice`;
+  } else {
+    cameraStatus.textContent = count === 0 ? "No hand detected" : `${count} hand${count > 1 ? "s" : ""} detected`;
+  }
 }
 
 async function turnCameraOn() {
@@ -745,6 +1500,10 @@ async function turnCameraOn() {
 
 function turnCameraOff() {
   if (handTrackingOn) setHandTracking(false);
+  gestureTriggerOn = false;
+  gestureTriggerToggle.disabled = true;
+  gestureTriggerToggle.textContent = "Pinch trigger: Off";
+  gestureTriggerToggle.setAttribute("aria-pressed", "false");
   if (cameraStream) {
     for (const track of cameraStream.getTracks()) track.stop();
     cameraStream = null;
@@ -783,8 +1542,13 @@ async function setHandTracking(on) {
     handTrackingToggle.textContent = "Hand tracking: On";
     handTrackingToggle.setAttribute("aria-pressed", "true");
     handTrackingToggle.disabled = false;
+    gestureTriggerToggle.disabled = false;
     requestAnimationFrame(handLoop);
   } else {
+    gestureTriggerOn = false;
+    gestureTriggerToggle.disabled = true;
+    gestureTriggerToggle.textContent = "Pinch trigger: Off";
+    gestureTriggerToggle.setAttribute("aria-pressed", "false");
     handTrackingOn = false;
     handLoopRunning = false;
     handTrackingToggle.textContent = "Hand tracking: Off";
@@ -809,6 +1573,17 @@ handTrackingToggle.addEventListener("click", () => {
     cameraStatus.textContent = `Hand tracking failed: ${err.message || err}`;
     handTrackingToggle.disabled = false;
   });
+});
+
+gestureTriggerToggle.addEventListener("click", () => {
+  if (!handTrackingOn) return;
+  gestureTriggerOn = !gestureTriggerOn;
+  gestureTriggerArmed = true;
+  gestureTriggerToggle.textContent = `Pinch trigger: ${gestureTriggerOn ? "On" : "Off"}`;
+  gestureTriggerToggle.setAttribute("aria-pressed", String(gestureTriggerOn));
+  cameraStatus.textContent = gestureTriggerOn
+    ? "Pinch thumb and index finger to start or stop voice."
+    : "Gesture trigger off.";
 });
 
 // ================================================================
@@ -873,10 +1648,24 @@ const SETTINGS_FIELDS = [
   { group: "Voice", key: "ELEVENLABS_VOICE_ID", label: "ElevenLabs voice ID", type: "text" },
   { group: "Voice", key: "PIPER_EXE_PATH", label: "Piper executable path (fallback)", type: "text" },
   { group: "Voice", key: "PIPER_VOICE_PATH", label: "Piper voice path (fallback)", type: "text" },
+  { group: "Speech recognition", key: "PROXY_WHISPER_CPP_EXE", label: "whisper.cpp executable path (optional)", type: "text" },
+  { group: "Speech recognition", key: "PROXY_WHISPER_CPP_MODEL", label: "GGML model file path (optional)", type: "text" },
+  { group: "Voice detection", key: "PROXY_DOUBLE_CLAP_ENABLED", label: "Always listen for double-clap trigger", type: "select" },
+  { group: "Voice detection", key: "PROXY_DOUBLE_CLAP_THRESHOLD", label: "Double-clap sensitivity threshold", type: "number" },
   { group: "Gmail", key: "GMAIL_CLIENT_ID", label: "Client ID", type: "text" },
   { group: "Gmail", key: "GMAIL_CLIENT_SECRET", label: "Client secret", type: "password" },
   { group: "Gmail", key: "GMAIL_REFRESH_TOKEN", label: "Refresh token", type: "password" },
+  { group: "Market data", key: "ALPHA_VANTAGE_API_KEY", label: "Alpha Vantage API key (free tier)", type: "password" },
+  { group: "Phone calls (Twilio)", key: "TWILIO_ACCOUNT_SID", label: "Account SID", type: "text" },
+  { group: "Phone calls (Twilio)", key: "TWILIO_AUTH_TOKEN", label: "Auth token", type: "password" },
+  { group: "Phone calls (Twilio)", key: "TWILIO_FROM_NUMBER", label: "Twilio phone number (E.164)", type: "text" },
+  { group: "iPhone integration", key: "PROXY_IPHONE_WEBHOOK_TOKEN", label: "SMS webhook secret (Bearer token)", type: "password" },
+  { group: "iPhone integration", key: "PROXY_IPHONE_WEBHOOK_BIND", label: "Webhook bind address (default 127.0.0.1)", type: "text" },
+  { group: "iPhone integration", key: "PROXY_IPHONE_WEBHOOK_PORT", label: "Webhook port (default 8787)", type: "number" },
+  { group: "iPhone integration", key: "PROXY_IPHONE_MESSAGES_FILE", label: "SMS history file path", type: "text" },
   { group: "Assistant", key: "PROXY_HOTKEY", label: "Hotkey", type: "text" },
+  { group: "Assistant", key: "PROXY_START_ON_LOGIN", label: "Start Proxy when I sign in (packaged app)", type: "select" },
+  { group: "Assistant", key: "PROXY_NEWS_INTERESTS", label: "News interests (comma-separated keywords)", type: "text" },
   { group: "Assistant", key: "PROXY_ORCHESTRATOR_MAX_STEPS", label: "Max tool steps per request", type: "number" },
   { group: "Assistant", key: "PROXY_SCRIPT_TIMEOUT_MS", label: "Script timeout (ms)", type: "number" },
   { group: "Storage", key: "PROXY_WORKSPACE_DIR", label: "Workspace directory", type: "text" },
@@ -917,6 +1706,21 @@ for (const field of SETTINGS_FIELDS) {
   label.textContent = field.label;
   label.htmlFor = `setting-${field.key}`;
   const input = document.createElement("input");
+  if (field.type === "select") {
+    const select = document.createElement("select");
+    select.id = `setting-${field.key}`;
+    for (const [value, text] of [["", "Disabled"], ["true", "Enabled"]]) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = text;
+      select.appendChild(option);
+    }
+    row.appendChild(label);
+    row.appendChild(select);
+    settingsBody.appendChild(row);
+    settingsInputs[field.key] = select;
+    return;
+  }
   input.type = field.type;
   input.id = `setting-${field.key}`;
   row.appendChild(label);
@@ -973,15 +1777,8 @@ settingsSaveBtn.addEventListener("click", () => {
 });
 
 // ---------- Sidebar (Milestone 14 shell) ----------
-// Toggle only - no persistence across relaunch (defaults to collapsed
-// every time), matching this milestone's "shell only" scope. The
-// Dashboard/Settings distinction above ("real" vs. "disabled") is
-// enforced here too: only the Settings item gets a click handler,
-// wired to the exact same openSettingsModal() the topbar button already
-// calls, so it's a second entry point to something real, not a second
-// thing to maintain. The future-destination items intentionally get no
-// listener at all - they're visually dimmed and non-interactive, same
-// "honest, not decorative" rule as the COMING SOON card.
+// The navigation rail links to real dashboard panels. Chat remains
+// visibly disabled until that separate interface exists.
 
 const sidebar = document.getElementById("sidebar");
 const sidebarToggle = document.getElementById("sidebarToggle");
@@ -1000,3 +1797,26 @@ sidebarSettingsItem.addEventListener("keydown", (event) => {
     openSettingsModal();
   }
 });
+
+for (const item of sidebar.querySelectorAll(".sidebar-item[data-target]")) {
+  const navigate = () => {
+    const target = document.getElementById(item.dataset.target);
+    if (!target) return;
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) target.focus({ preventScroll: true });
+    if (target.id === "memoryPanel") void refreshMemoryPanel();
+    sidebar.querySelectorAll(".sidebar-item[aria-current]").forEach((active) => {
+      active.classList.remove("active");
+      active.removeAttribute("aria-current");
+    });
+    item.classList.add("active");
+    item.setAttribute("aria-current", "page");
+  };
+  item.addEventListener("click", navigate);
+  item.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      navigate();
+    }
+  });
+}

@@ -23,6 +23,7 @@
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
+import { writeFileAtomically } from "./atomicFile";
 
 export interface LogEntry {
   kind: string;
@@ -37,6 +38,7 @@ const LOG_FILE = process.env.PROXY_SESSION_LOG_FILE || path.join(os.homedir(), "
 // 500 is generous for "history you might actually scroll back through"
 // while staying a small, fast-to-load file even on a slow disk.
 const MAX_ENTRIES = 500;
+let writeQueue: Promise<void> = Promise.resolve();
 
 export async function loadLogHistory(): Promise<LogEntry[]> {
   try {
@@ -61,20 +63,18 @@ export async function loadLogHistory(): Promise<LogEntry[]> {
  * simple rather than optimizing for a load this app doesn't have.
  */
 export async function appendLogEntry(kind: string, text: string): Promise<void> {
-  try {
+  const write = writeQueue.then(async () => {
     const existing = await loadLogHistory();
     const entry: LogEntry = { kind, text, timestamp: new Date().toISOString() };
     const combined = [...existing, entry];
     const trimmed = combined.length > MAX_ENTRIES ? combined.slice(combined.length - MAX_ENTRIES) : combined;
     await fs.mkdir(path.dirname(LOG_FILE), { recursive: true });
-    await fs.writeFile(LOG_FILE, JSON.stringify(trimmed), "utf-8");
-  } catch (err) {
-    // Best-effort, same as core/memory.ts's extraction failures - a
-    // failed log write should never crash the app or block the
-    // dashboard's own live update, which has already happened by the
-    // time this runs.
+    await writeFileAtomically(LOG_FILE, JSON.stringify(trimmed));
+  });
+  writeQueue = write.catch((err) => {
     console.error("Failed to persist session log entry:", err);
-  }
+  });
+  await writeQueue;
 }
 
 /**
@@ -84,10 +84,10 @@ export async function appendLogEntry(kind: string, text: string): Promise<void> 
  * appendLogEntry's next write would just have to handle anyway.
  */
 export async function clearLogHistory(): Promise<void> {
-  try {
+  const write = writeQueue.then(async () => {
     await fs.mkdir(path.dirname(LOG_FILE), { recursive: true });
-    await fs.writeFile(LOG_FILE, JSON.stringify([]), "utf-8");
-  } catch (err) {
-    console.error("Failed to clear session log:", err);
-  }
+    await writeFileAtomically(LOG_FILE, JSON.stringify([]));
+  });
+  writeQueue = write.catch((err) => console.error("Failed to clear session log:", err));
+  await writeQueue;
 }
