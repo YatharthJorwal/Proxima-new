@@ -12,39 +12,28 @@
   <nav class="sidebar" id="sidebar" aria-label="Navigation">
     <button id="sidebarToggle" class="sidebar-toggle" aria-label="Toggle navigation" aria-expanded="false">☰</button>
     <ul class="sidebar-nav">
-      <li class="sidebar-item active" aria-current="page" data-target="dashboardTop" role="button" tabindex="0">
-        <span class="sidebar-icon" aria-hidden="true">▣</span>
-        <span class="sidebar-label">Dashboard</span>
+      <li class="sidebar-item active" aria-current="page" data-view="home" role="button" tabindex="0">
+        <span class="sidebar-icon" aria-hidden="true">▣</span><span class="sidebar-label">Home</span>
       </li>
-      <li class="sidebar-item" id="sidebarSettingsItem" role="button" tabindex="0">
-        <span class="sidebar-icon" aria-hidden="true">⚙</span>
-        <span class="sidebar-label">Settings</span>
+      <li class="sidebar-item" data-view="camera" role="button" tabindex="0">
+        <span class="sidebar-icon" aria-hidden="true">◉</span><span class="sidebar-label">Camera</span>
+      </li>
+      <li class="sidebar-item" data-view="memory" role="button" tabindex="0">
+        <span class="sidebar-icon" aria-hidden="true">≣</span><span class="sidebar-label">Memory &amp; Log</span>
+      </li>
+      <li class="sidebar-item" data-view="system" role="button" tabindex="0">
+        <span class="sidebar-icon" aria-hidden="true">▤</span><span class="sidebar-label">System</span>
+      </li>
+      <li class="sidebar-item" data-view="tools" role="button" tabindex="0">
+        <span class="sidebar-icon" aria-hidden="true">✦</span><span class="sidebar-label">Tools</span>
+      </li>
+      <li class="sidebar-item" data-view="studio" role="button" tabindex="0">
+        <span class="sidebar-icon" aria-hidden="true">⬡</span><span class="sidebar-label">3D Studio</span>
       </li>
     </ul>
     <ul class="sidebar-nav sidebar-nav-future">
-      <li class="sidebar-item" data-target="cameraPanel" role="button" tabindex="0">
-        <span class="sidebar-icon" aria-hidden="true">•</span>
-        <span class="sidebar-label">Camera</span>
-      </li>
-      <li class="sidebar-item" data-target="inputText" role="button" tabindex="0">
-        <span class="sidebar-icon" aria-hidden="true">•</span>
-        <span class="sidebar-label">Chat</span>
-      </li>
-      <li class="sidebar-item" data-target="memoryPanel" role="button" tabindex="0">
-        <span class="sidebar-icon" aria-hidden="true">•</span>
-        <span class="sidebar-label">Memory</span>
-      </li>
-      <li class="sidebar-item" data-target="toolsPanel" role="button" tabindex="0">
-        <span class="sidebar-icon" aria-hidden="true">•</span>
-        <span class="sidebar-label">Tools</span>
-      </li>
-      <li class="sidebar-item" data-target="mapPanel" role="button" tabindex="0">
-        <span class="sidebar-icon" aria-hidden="true">•</span>
-        <span class="sidebar-label">Maps</span>
-      </li>
-      <li class="sidebar-item" data-target="devicesPanel" role="button" tabindex="0">
-        <span class="sidebar-icon" aria-hidden="true">•</span>
-        <span class="sidebar-label">Devices</span>
+      <li class="sidebar-item" id="sidebarSettingsItem" role="button" tabindex="0">
+        <span class="sidebar-icon" aria-hidden="true">⚙</span><span class="sidebar-label">Settings</span>
       </li>
     </ul>
   </nav>
@@ -62,10 +51,11 @@
     </div>
   </header>
 
-  <main class="grid">
+  <main class="views" id="views">
 
-    <!-- LEFT COLUMN -->
-    <section class="col col-left">
+    <!-- HOME: the daily-driver screen. Input, output and the orb only. -->
+    <section class="view view-home active" id="view-home" data-view-name="home">
+      <div class="col col-left">
       <div class="card">
         <div class="card-title">INPUT</div>
         <form id="inputForm" class="input-row">
@@ -75,6 +65,7 @@
         </form>
       </div>
 
+
       <div class="card">
         <div class="card-title">OUTPUT</div>
         <div class="output-box" id="outputBox">
@@ -82,6 +73,37 @@
         </div>
       </div>
 
+
+      </div>
+      <div class="col col-center">
+      <div class="orb-stage" id="orbStage" data-state="idle">
+        <div class="orb-halo"></div>
+        <canvas id="orbCanvas"></canvas>
+      </div>
+      <div class="orb-caption">
+        <span class="orb-title">PROXIMA CORE</span>
+        <span class="orb-state" id="orbStateLabel">• IDLE</span>
+      </div>
+
+      <!-- Milestone 9 step 6: replaces the old left-column PIPELINE card
+           (see CLAUDE.md's Milestone 9 plan, item 7, for the design and
+           why it lives here instead). Hidden until the first "listening"
+           event ever fires — see renderer.js's Activity panel section. -->
+      <div class="card activity-card hidden" id="activityCard">
+        <div class="card-title">PROXIMA ACTIVITY</div>
+        <ol class="activity-list" id="activityList"></ol>
+        <div class="activity-final hidden" id="activityFinal">
+          <div class="activity-final-rule"></div>
+          <div class="activity-final-text" id="activityFinalText"></div>
+        </div>
+      </div>
+
+      </div>
+    </section>
+
+    <!-- CAMERA -->
+    <section class="view view-camera" id="view-camera" data-view-name="camera">
+      <div class="view-narrow">
       <!-- Off by default, on request only — no getUserMedia call happens
            until #cameraOnBtn is clicked. This is a preview card; the
            full-featured camera window is a future sidebar destination
@@ -107,50 +129,41 @@
         <div class="camera-status" id="cameraStatus"></div>
       </div>
 
-      <!-- Moved here on request — the center-column placement got cut
-           off below the fold with no way to scroll to it (col-center
-           doesn't scroll like col-left/col-right do). Back to the
-           original small size to match its new neighbors. -->
-      <div class="card placeholder-card">
+
+      </div>
+    </section>
+
+    <!-- MEMORY & LOG -->
+    <section class="view view-memory" id="view-memory" data-view-name="memory">
+      <div class="card memory-card" id="memoryPanel">
         <div class="card-title-row">
-          <div class="card-title">NEURAL NETWORK</div>
-          <span class="soon-tag">Not built yet</span>
+          <div class="card-title">MEMORY</div>
+          <div class="memory-actions">
+            <button id="refreshMemoryBtn" type="button">Refresh</button>
+            <button id="clearMemoryBtn" type="button">Forget all</button>
+          </div>
         </div>
-        <div class="placeholder-visual placeholder-nodes" aria-hidden="true">
-          <span></span><span></span><span></span><span></span><span></span>
-          <span></span><span></span><span></span><span></span><span></span>
-        </div>
-        <p class="placeholder-note">Decorative for now — a literal view into the model's internals isn't something this could show truthfully.</p>
+        <p class="memory-note">Locally saved facts Proxy may use in later conversations.</p>
+        <div id="memoryList" class="memory-list" aria-live="polite">Select Refresh to view saved facts.</div>
       </div>
+
+
+      <div class="card card-grow">
+        <div class="card-title-row">
+          <div class="card-title">SESSION LOG</div>
+          <button id="clearLogBtn" class="clear-log-btn" title="Clear session log">Clear</button>
+        </div>
+        <div class="log" id="log" aria-live="polite">
+          <p class="log-empty" id="logEmpty">Every step will show up here as it happens.</p>
+        </div>
+        <div class="log-footer-note">Full session history → Memory <span class="log-footer-tag">Soon</span></div>
+      </div>
+
+
     </section>
 
-    <!-- CENTER COLUMN -->
-    <section class="col col-center">
-      <div class="orb-stage" id="orbStage" data-state="idle">
-        <div class="orb-halo"></div>
-        <canvas id="orbCanvas"></canvas>
-      </div>
-      <div class="orb-caption">
-        <span class="orb-title">PROXIMA CORE</span>
-        <span class="orb-state" id="orbStateLabel">• IDLE</span>
-      </div>
-
-      <!-- Milestone 9 step 6: replaces the old left-column PIPELINE card
-           (see CLAUDE.md's Milestone 9 plan, item 7, for the design and
-           why it lives here instead). Hidden until the first "listening"
-           event ever fires — see renderer.js's Activity panel section. -->
-      <div class="card activity-card hidden" id="activityCard">
-        <div class="card-title">PROXIMA ACTIVITY</div>
-        <ol class="activity-list" id="activityList"></ol>
-        <div class="activity-final hidden" id="activityFinal">
-          <div class="activity-final-rule"></div>
-          <div class="activity-final-text" id="activityFinalText"></div>
-        </div>
-      </div>
-    </section>
-
-    <!-- RIGHT COLUMN -->
-    <section class="col col-right">
+    <!-- SYSTEM -->
+    <section class="view view-system" id="view-system" data-view-name="system">
       <div class="card">
         <div class="card-title">SYSTEM STATUS</div>
         <div class="status-grid">
@@ -159,6 +172,7 @@
           <div class="status-row"><span>Uptime</span><span id="statusUptime">0:00</span></div>
         </div>
       </div>
+
 
       <div class="card system-monitor-card">
         <div class="card-title-row">
@@ -179,27 +193,29 @@
         <div class="monitor-process-list" id="monitorTopCpu">Waiting for sample…</div>
       </div>
 
-      <div class="card memory-card" id="memoryPanel">
-        <div class="card-title-row">
-          <div class="card-title">MEMORY</div>
-          <div class="memory-actions">
-            <button id="refreshMemoryBtn" type="button">Refresh</button>
-            <button id="clearMemoryBtn" type="button">Forget all</button>
-          </div>
-        </div>
-        <p class="memory-note">Locally saved facts Proxy may use in later conversations.</p>
-        <div id="memoryList" class="memory-list" aria-live="polite">Select Refresh to view saved facts.</div>
-      </div>
 
-      <div class="card card-grow">
+      <div class="card" id="devicesCard">
+        <div class="card-title">DEVICES</div>
+        <div class="soon-list">
+          <div class="soon-row" id="devicesPanel"><span class="soon-name">Devices detected now</span></div>
+          <div class="device-list" id="presentDeviceList" aria-live="polite">Waiting for Windows device inventory…</div>
+
+        </div>
+      </div>
+      <!-- Moved here on request — the center-column placement got cut
+           off below the fold with no way to scroll to it (col-center
+           doesn't scroll like col-left/col-right do). Back to the
+           original small size to match its new neighbors. -->
+      <div class="card placeholder-card">
         <div class="card-title-row">
-          <div class="card-title">SESSION LOG</div>
-          <button id="clearLogBtn" class="clear-log-btn" title="Clear session log">Clear</button>
+          <div class="card-title">NEURAL NETWORK</div>
+          <span class="soon-tag">Not built yet</span>
         </div>
-        <div class="log" id="log" aria-live="polite">
-          <p class="log-empty" id="logEmpty">Every step will show up here as it happens.</p>
+        <div class="placeholder-visual placeholder-nodes" aria-hidden="true">
+          <span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span>
         </div>
-        <div class="log-footer-note">Full session history → Memory <span class="log-footer-tag">Soon</span></div>
+        <p class="placeholder-note">Decorative for now — a literal view into the model's internals isn't something this could show truthfully.</p>
       </div>
 
       <div class="card placeholder-card">
@@ -213,11 +229,14 @@
         <p class="placeholder-note">Will chart real request history once there's some to show.</p>
       </div>
 
+
+    </section>
+
+    <!-- TOOLS: map + news -->
+    <section class="view view-tools" id="view-tools" data-view-name="tools">
       <div class="card" id="toolsPanel">
-        <div class="card-title">LIVE TOOLS</div>
+        <div class="card-title">LIVE MAP</div>
         <div class="soon-list">
-          <div class="soon-row" id="devicesPanel"><span class="soon-name">Devices detected now</span></div>
-          <div class="device-list" id="presentDeviceList" aria-live="polite">Waiting for Windows device inventory…</div>
           <div class="soon-row" id="mapPanel"><span class="soon-name">Live map</span></div>
           <div class="map-controls">
             <button id="mapLocationBtn" type="button">Enable location</button>
@@ -226,10 +245,33 @@
           <div class="map-privacy-note">Proxima requests location only when you enable it. Tile requests disclose the viewed map area to OpenStreetMap.</div>
           <div class="map-tiles" id="mapTiles" aria-label="OpenStreetMap"></div>
           <div class="map-attribution">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a></div>
+
+        </div>
+      </div>
+      <div class="card" id="newsCard">
+        <div class="card-title">NEWS</div>
+        <div class="soon-list">
           <div class="soon-row"><span class="soon-name">News</span><button id="newsRefreshBtn" type="button">Refresh</button></div>
           <div id="newsStatus" aria-live="polite">Refresh to load current headlines.</div>
           <div id="newsList" class="news-list"></div>
-          <div class="soon-row"><span class="soon-name">3D Studio (early)</span></div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- 3D STUDIO: canvas gets the room, controls sit beside it -->
+    <section class="view view-studio" id="view-studio" data-view-name="studio">
+      <div class="card studio-card">
+        <div class="card-title">3D STUDIO (EARLY)</div>
+        <div class="studio-layout">
+          <div class="studio-stage">
+          <canvas id="modelCanvas" aria-label="3D model workspace"></canvas>
+          <div id="modelStatus" aria-live="polite">Add a primitive, drag to orbit, scroll to zoom. Choose the STL scale before export.</div>
+          <div id="modelMetrics" class="model-metrics" aria-live="polite"></div>
+          <div id="modelAnalysis" class="model-analysis" aria-live="polite"></div>
+
+          </div>
+          <div class="studio-controls">
           <div class="model-toolbar">
             <button id="addBoxBtn" type="button">Add box</button>
             <button id="addSphereBtn" type="button">Add sphere</button>
@@ -253,7 +295,6 @@
             </div>
           </div>
           <input id="modelFileInput" type="file" accept=".stl,.obj,model/stl,text/plain" hidden />
-          <canvas id="modelCanvas" aria-label="3D model workspace"></canvas>
           <div class="model-transform-grid">
             <label>X <input id="modelX" type="number" min="-100" max="100" step="0.1" value="0"></label>
             <label>Y <input id="modelY" type="number" min="-100" max="100" step="0.1" value="0"></label>
@@ -272,9 +313,8 @@
           <label class="model-stl-unit">STL scale <span>1 scene unit =</span>
             <select id="modelStlUnit"><option value="mm">1 mm</option><option value="cm">1 cm</option><option value="in">1 inch</option></select>
           </label>
-          <div id="modelStatus" aria-live="polite">Add a primitive, drag to orbit, scroll to zoom. Choose the STL scale before export.</div>
-          <div id="modelMetrics" class="model-metrics" aria-live="polite"></div>
-          <div id="modelAnalysis" class="model-analysis" aria-live="polite"></div>
+
+          </div>
         </div>
       </div>
     </section>

@@ -1626,6 +1626,7 @@ document.addEventListener("keydown", (event) => {
   const alreadyTyping = active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA");
   if (alreadyTyping) return;
   event.preventDefault();
+  showView("home");
   inputText.focus();
 });
 
@@ -1798,20 +1799,29 @@ sidebarSettingsItem.addEventListener("keydown", (event) => {
   }
 });
 
-for (const item of sidebar.querySelectorAll(".sidebar-item[data-target]")) {
-  const navigate = () => {
-    const target = document.getElementById(item.dataset.target);
-    if (!target) return;
-    target.scrollIntoView({ behavior: "smooth", block: "start" });
-    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) target.focus({ preventScroll: true });
-    if (target.id === "memoryPanel") void refreshMemoryPanel();
-    sidebar.querySelectorAll(".sidebar-item[aria-current]").forEach((active) => {
-      active.classList.remove("active");
-      active.removeAttribute("aria-current");
-    });
-    item.classList.add("active");
-    item.setAttribute("aria-current", "page");
-  };
+// Each sidebar entry with data-view shows exactly that page. Hidden pages
+// are display:none, so the canvases that measure themselves (orb, 3D
+// studio, camera overlay) are re-measured via a synthetic resize.
+const viewSections = Array.from(document.querySelectorAll(".view[data-view-name]"));
+
+function showView(name) {
+  const section = viewSections.find((v) => v.dataset.viewName === name);
+  if (!section) return;
+  for (const v of viewSections) v.classList.toggle("active", v === section);
+  section.scrollTop = 0;
+  sidebar.querySelectorAll(".sidebar-item[data-view]").forEach((el) => {
+    const on = el.dataset.view === name;
+    el.classList.toggle("active", on);
+    if (on) el.setAttribute("aria-current", "page");
+    else el.removeAttribute("aria-current");
+  });
+  if (name === "memory") void refreshMemoryPanel();
+  // Wait one frame so the section has layout before canvases measure it.
+  requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
+}
+
+for (const item of sidebar.querySelectorAll(".sidebar-item[data-view]")) {
+  const navigate = () => showView(item.dataset.view);
   item.addEventListener("click", navigate);
   item.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === " ") {

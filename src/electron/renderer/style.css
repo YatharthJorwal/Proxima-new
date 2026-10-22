@@ -1352,3 +1352,68 @@ body.sidebar-expanded {
     transition: none !important;
   }
 }
+
+/* ================================================================
+   Multi-view layout (replaces the single crammed .grid homepage)
+   Each sidebar item shows exactly one .view; renderer.js toggles
+   .active and fires a window "resize" so the WebGL canvases and the
+   camera overlay re-measure after being display:none.
+   ================================================================ */
+
+.views {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 16px 22px 22px;
+  overflow: hidden;
+  display: flex;
+}
+
+.view {
+  display: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  gap: 16px;
+  overflow-y: auto;
+  align-content: start;
+}
+
+.view.active { display: grid; }
+
+/* Home: input/output left, orb centered */
+.view-home { grid-template-columns: minmax(300px, 380px) 1fr; align-content: stretch; }
+.view-home .col-left { overflow-y: auto; }
+
+/* Camera: one centered, roomier card */
+.view-camera { grid-template-columns: minmax(0, 760px); justify-content: center; }
+.view-narrow { min-width: 0; }
+
+/* Memory & log: side by side, uncapped heights */
+.view-memory { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.view-memory .memory-list { max-height: none; }
+.view-memory .card-grow { max-height: none; }
+
+/* System + Tools: responsive card grids */
+.view-system { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+.view-tools  { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+.view-tools .news-list { max-height: 60vh; }
+
+/* 3D Studio: canvas takes the room, controls in a side rail */
+.view-studio { grid-template-columns: minmax(0, 1fr); }
+.studio-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 16px;
+  margin-top: 10px;
+}
+.studio-stage { min-width: 0; }
+.studio-stage #modelCanvas { height: calc(100vh - 290px); min-height: 360px; }
+.studio-controls { min-width: 0; max-height: calc(100vh - 220px); overflow-y: auto; padding-right: 4px; }
+.studio-controls .model-toolbar { margin-top: 0; }
+
+@media (max-width: 1100px) {
+  .view-home { grid-template-columns: minmax(0, 1fr); }
+  .view-memory { grid-template-columns: minmax(0, 1fr); }
+  .studio-layout { grid-template-columns: minmax(0, 1fr); }
+  .studio-controls { max-height: none; }
+}
