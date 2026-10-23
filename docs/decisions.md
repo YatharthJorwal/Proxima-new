@@ -1338,3 +1338,55 @@ hypothetical edge case, and exactly the kind of thing that would only
 surface on a machine with very few processes matching a filter, easy to
 miss without a dedicated test for it. `asArray()`'s normalization and
 its test both exist specifically because of this.
+
+## Dashboard: six pages instead of one crowded grid
+
+**Problem.** After the news, 3D Studio, map, devices, and monitor features
+landed, the single three-column dashboard put everything on one screen; the
+Live Tools card alone stacked devices, map, news, and the whole 3D editor in
+a 320px column, with the 3D canvas at 230px tall.
+
+**Decision.** Turn the sidebar into real navigation: Home (input, output,
+orb, activity), Camera, Memory & Log, System, Tools, 3D Studio. Settings
+stays a modal. Chosen over alternatives because it is a pure re-parenting of
+existing cards — every element ID is unchanged — so none of the ~1.8k lines
+of renderer logic needed rewriting, and nothing was removed.
+
+**Costs accepted.** Hidden pages are `display:none`, so canvases measure 0px
+until shown; the fix is one synthetic `resize` event after each switch (the
+orb, 3D canvas, and camera overlay already listened for it). New canvas
+panels must do the same. The `/` shortcut now switches to Home first.
+
+**Not verified.** The page-switching logic was exercised in a simulated DOM
+only. Real-window layout (especially the 3D canvas size and the camera
+overlay after switching away and back) awaits the user's confirmation.
+
+## Next: replace the Electron UI — decision deliberately left open
+
+**Motivation (user's).** The Electron dashboard is hard to customize; a React
+front end could do far more, and the user has built good web UIs before.
+
+**What was established, so the next session doesn't re-derive it.** Electron
+is only lightly coupled to the rest of the project: `electron/main.ts`,
+`electron/preload.ts`, and one `utilityProcess.fork` in `core/stt.ts`. The
+core is TypeScript/Node and UI-agnostic. The actual pain lives in the
+vanilla-JS renderer, so a React front end could replace it either inside
+Electron (smallest change, every Node feature keeps working) or in Tauri
+(no embedded Node: the core would become a sidecar process or be ported, the
+WebView differs from Chromium so WebGL/camera/MediaPipe need re-verifying,
+and the global hotkey, login item, and installer need replacements).
+
+**Left open on purpose.** Which route, and what "customizable" means
+(themes, movable panels, layout presets), are the user's calls — see the
+decision points in `handoff.md`. Same "ask, don't default" rule as the
+browser-automation profile decision.
+
+## A dead UI after a large agent edit: what the diagnosis taught
+
+An unreviewed ~38-file change left the dashboard completely unresponsive.
+`tsc --noEmit` passed, `node --check renderer.js` passed, and the build copied
+every vendored file correctly — all red herrings. The cause was one illegal
+top-level `return;` in an ES module, visible only in the DevTools console.
+Lessons recorded in `workflows.md`: check the renderer as a module, read the
+console first, and review large agent-made diffs by file list before running
+them.

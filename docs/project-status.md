@@ -52,8 +52,10 @@ Both are now resolved.
     Windows confirmation
 13. Settings panel + persistent dashboard session history — **done,
     confirmed** (session history and settings UI)
-14. Dashboard visual refresh — shell and live monitor/device panels built;
-    awaiting clean Electron launch and real-machine UI confirmation
+14. Dashboard visual refresh — shell, live monitor/device panels, and the
+    six-page layout (Home, Camera, Memory & Log, System, Tools, 3D Studio)
+    built; launches cleanly after the Settings-loop syntax fix; visual
+    confirmation of every page is still the user's to give
 15. STT upgrade (Distil-Large-v3.5 + real GPU acceleration) — CUDA
     whisper.cpp runtime and weights installed; inference confirmation remains
 16. iPhone integration — authenticated SMS webhook and inbox query built;
@@ -74,6 +76,8 @@ Both are now resolved.
     and local-model summarization built; awaiting live feed confirmation
 22. Proxy can call your phone — outbound spoken-message slice built;
     provider setup and real-machine confirmation remain
+23. Move the dashboard UI off Electron — **planned, next session**; see
+    `handoff.md` and Milestone 23 below
 
 ## Milestones 1–5 — complete
 
@@ -672,9 +676,15 @@ the *execution* further toward the reference's polish/contrast/liveliness,
 plus several independently-scoped fixes, not a new direction.
 
 Implemented scope:
-- **Sidebar navigation**: collapsed icon rail with working Dashboard and
-  Settings controls plus links to the typed Chat input and existing Camera,
-  Tools, Maps, Devices, and Memory panels.
+- **Sidebar navigation**: collapsed icon rail. Originally the entries
+  scrolled to panels on one crowded three-column page. It now switches
+  between six real pages — Home (input, output, orb, activity), Camera,
+  Memory & Log, System (status, monitor, devices, the two honest
+  not-built placeholders), Tools (map, news), and 3D Studio (large canvas
+  plus a controls rail) — with Settings still a modal. All element IDs are
+  unchanged. Hidden pages are `display:none`, so each switch fires a
+  synthetic `resize` for the orb, 3D canvas, and camera overlay. Verified in
+  a simulated DOM only; real-window confirmation of each page remains.
 - **Activity panel**: refined, not replaced (see Milestone 9 above) —
   friendlier row labels, same real event/timing rules.
 - **Orb**: no change in direction — already correctly event-driven rather
@@ -710,6 +720,26 @@ CUDA transcription fails. Real speech inference and GPU utilization
 measurement remain unverified. The model's official GGML conversion is
 described in the [model card](https://huggingface.co/distil-whisper/distil-large-v3.5-ggml).
 Full investigation findings and tradeoffs: `decisions.md`.
+
+## Milestone 23 — Move the dashboard UI off Electron — planned
+
+Motivation (user's): the Electron dashboard's vanilla HTML/CSS/JS UI is hard
+to customize; a React-based front end (Tauri or similar) would allow much
+more. Nothing is built yet. Scope, the Electron-coupling inventory, and the
+open decisions (Tauri vs. a React renderer inside Electron, sidecar design
+if Tauri, what "customizable" should mean) are written up in `handoff.md`.
+Constraint carried over from `CLAUDE.md`: keep the security defaults and the
+"show only real signals" rule in the new UI, and keep the Electron app
+runnable until the new one reaches parity.
+
+## Incident note — dashboard dead after a large agent edit
+
+A large uncommitted change left the dashboard unresponsive (no orb, buttons,
+or chat). Cause: an illegal top-level `return;` inside the Settings-field
+`for` loop in `renderer.js` (should have been `continue;`), which made the
+whole ES-module script fail to parse. `tsc` and `node --check` both passed;
+only the DevTools console showed it. Fixed, and the check procedure is now in
+`workflows.md`.
 
 ## Deferred / not in MVP
 

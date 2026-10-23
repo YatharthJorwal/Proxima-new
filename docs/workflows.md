@@ -147,7 +147,23 @@ work here has to be verified:
    Milestone 9 step 5 did (`orchestrator.test.ts`, `npm test`) and is a
    reasonable general pattern for future control-flow-heavy features.
 
+5. **Check the renderer the way the browser loads it.** `renderer.js` is an
+   ES module (`<script type="module">`). `node --check renderer.js` treats
+   it as CommonJS and will *pass* a top-level `return` that the browser
+   rejects, and `tsc --noEmit` does not cover it at all. Use:
+   ```
+   copy src\electron\renderer\renderer.js $env:TEMP\renderer-check.mjs
+   node --check $env:TEMP\renderer-check.mjs
+   ```
+   then launch the app and look at the DevTools console (Ctrl+Shift+I).
+   One syntax error silently kills the whole window — orb, buttons, and
+   chat at once — so a dead UI means "read the console first."
+
 ## Patch delivery for small, isolated changes
+
+Apply a delivered patch from the `core` folder with
+`git apply --whitespace=fix ..\patch\<name>.patch` (add `--3way` if it
+reports a context mismatch). A "new blank line at EOF" warning is harmless.
 
 For a small, purely mechanical change with no logic impact (e.g. a pure
 CSS/layout move, same element IDs, no JS changes), it's reasonable to

@@ -53,6 +53,10 @@ local models.
   uses.
 - Commit to git at each completed milestone/step, per the user's standing
   request.
+- Never run `node --check` on `renderer.js` as proof it parses: Node treats
+  it as CommonJS, the browser as an ES module, and they disagree on
+  top-level `return`. Check a `.mjs` copy and the real DevTools console
+  (`docs/workflows.md`).
 
 ## Architecture & stack (high level)
 TypeScript/Node.js project. Pipeline: hotkey trigger → VAD-gated recording →
@@ -63,9 +67,18 @@ webcam hand-tracking slice. Full stack table, diagrams, and directory
 layout: `docs/architecture.md`.
 
 ## Current status (short version)
-Read `docs/project-status.md` for milestone status and the remaining
-external setup and real-machine gates. The short-lived debugging handoff
-has been folded into that file and `docs/decisions.md`.
+Read `handoff.md` first for the latest session snapshot (what just
+happened, what is confirmed vs. not, and the next goal), then
+`docs/project-status.md` for milestone status and the remaining external
+setup and real-machine gates.
+
+**Next goal: move the dashboard UI off Electron** (React front end;
+Tauri or React-in-Electron — an open decision for the user). The core
+(`src/core`, `src/commands`) is UI-agnostic; only `src/electron/` and one
+`utilityProcess` call in `src/core/stt.ts` import Electron. Details and the
+decision points are in `handoff.md`. Until that migration lands, the
+Electron dashboard is the supported UI: it is split into six pages (Home,
+Camera, Memory & Log, System, Tools, 3D Studio) selected from the sidebar.
 
 Milestones 1–9 are recorded as confirmed on the user's Windows machine.
 Milestone 10 is partly complete: file/script tools, memory, and stock
@@ -87,6 +100,8 @@ multi-tool behavior with qwen3.5:9b at the available VRAM budget. See
 model choices.
 
 ## Documentation
+- `handoff.md` — short-lived snapshot of the latest session and the next
+  goal. Replace or delete it once its contents are folded into the docs below.
 - `docs/architecture.md` — the pipeline, stack table, directory structure,
   and how each *built* subsystem currently works (VAD, CV/MediaPipe,
   Electron dashboard internals, tool registry, orchestrator shape).

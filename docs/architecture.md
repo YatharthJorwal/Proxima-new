@@ -252,6 +252,19 @@ reply. Design principle: **show the process, never hide it.**
 - `electron/renderer/` — plain HTML/CSS/JS, no framework. `renderer.js`
   also contains the Milestone 7 camera + MediaPipe logic, opt-in map/news
   panels, and the primitive 3D model workspace.
+- **Page layout**: `<main class="views">` holds six `<section class="view">`
+  pages — `home`, `camera`, `memory`, `system`, `tools`, `studio` — and only
+  the `.active` one is displayed. The sidebar items carry `data-view`;
+  `showView(name)` in `renderer.js` toggles `.active`, refreshes Memory when
+  that page opens, and dispatches a synthetic `window` `resize` on the next
+  frame so the orb, 3D canvas, and camera overlay re-measure after being
+  `display:none`. Any new canvas panel must listen for `resize`. The `/`
+  shortcut switches to Home before focusing the Input box.
+- **Electron coupling** (relevant to the planned UI migration): only
+  `electron/main.ts`, `electron/preload.ts`, and a `utilityProcess.fork` call
+  in `core/stt.ts` import Electron. `core/` and `commands/` are plain
+  TypeScript/Node, and `ProxyEngine` is an `EventEmitter` any front end can
+  observe. See `handoff.md`.
 - **Security defaults**: `contextIsolation: true`, `nodeIntegration: false`,
   `sandbox: true`; `session.defaultSession.setPermissionRequestHandler`
   allows `"media"` (camera) and `"geolocation"` (requested only after the
@@ -269,9 +282,10 @@ reply. Design principle: **show the process, never hide it.**
   - **Vendoring gotcha**: `three.module.js` is not a single self-contained
     bundle — it imports `./three.core.js`. Both files must be copied into
     the vendor directory together, or the import fails at runtime.
-- **Live Tools card**: contains real present-device inventory, opt-in map
-  view, manually refreshed RSS headlines, and an early primitive 3D editor.
-  Location stays off until explicitly enabled; no fake data fills the other
+- **Tools and System pages**: real present-device inventory (System),
+  opt-in map view and manually refreshed RSS headlines (Tools), and an early
+  primitive 3D editor (its own 3D Studio page, canvas plus a controls rail).
+  Location stays off until explicitly enabled; no fake data fills the
   placeholder activity/graph panels.
 - **Per-stage timing**: each Activity panel row shows a live-ticking timer
   while active and freezes the elapsed time on completion (via

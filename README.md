@@ -136,6 +136,9 @@ npm run dashboard
 ```
 Once it's open, press **F9 anywhere** (the window doesn't need focus) to
 talk, or type into the Input box.
+The sidebar switches between pages: **Home** (input, output, orb), **Camera**,
+**Memory & Log**, **System**, **Tools** (map, news), and **3D Studio**;
+**Settings** opens as a window.
 
 **CLI only** — no window, just this terminal.
 ```
