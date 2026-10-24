@@ -55,7 +55,8 @@
 
 import "dotenv/config";
 import { getEffectiveSettings, saveSettings, SettingsMap, SETTINGS_KEYS } from "../core/settings";
-import { app, BrowserWindow, globalShortcut, ipcMain, session } from "electron";
+import { app, BrowserWindow, globalShortcut, ipcMain, session, shell, WebContents } from "electron";
+import * as fs from "fs";
 import * as path from "path";
 import { ProxyEngine, RouteInfo } from "../core/engine";
 import { appendLogEntry, loadLogHistory, clearLogHistory } from "../core/sessionLog";
@@ -71,12 +72,21 @@ const HOTKEY = process.env.PROXY_HOTKEY || "F9";
 const MAX_TYPED_INPUT_LENGTH = 1000;
 
 let mainWindow: BrowserWindow | null = null;
+// Camera (hand tracking) and 3D Studio have not moved into the React shell yet;
+// they open the classic dashboard in this second window. It receives no engine
+// events (send() only targets mainWindow), so nothing is logged twice.
+let classicWindow: BrowserWindow | null = null;
 const engine = new ProxyEngine();
 const clapDetector = new DoubleClapDetector(() => { void triggerVoiceOrCancel(); });
 let voiceTriggerStarting = false;
 
 function send(channel: string, payload?: unknown) {
-  mainWindow?.webContents.send(channel, payload);
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+}
+
+function isAppContents(contents: WebContents | null): boolean {
+  if (!contents) return false;
+  return contents === mainWindow?.webContents || contents === classicWindow?.webContents;
 }
 
 // Every engine event gets its own IPC channel, forwarded as-is. This list
@@ -203,6 +213,12 @@ function wireRendererCommands() {
   // only needs to wipe the persisted copy; there's nothing to send back.
   ipcMain.on("proxy:clear-log", () => {
     void clearLogHistory();
+  });
+
+  // Opens the classic dashboard on a page that hasn't moved to the React
+  // shell yet. Only the two known page names are accepted.
+  ipcMain.on("proxy:open-classic", (_event, view) => {
+    if (view === "camera" || view === "studio") openClassic(view);
   });
 
   // Milestone 14 — mic icon inside the Input box: same trigger as the
@@ -355,11 +371,11 @@ function wireRendererCommands() {
 // least-privilege instinct as the rest of this app's Electron config.
 function wireCameraPermission() {
   session.defaultSession.setPermissionCheckHandler((webContents, permission, requestingOrigin) => {
-    const isLocalApp = webContents === mainWindow?.webContents && requestingOrigin.startsWith("file://");
+    const isLocalApp = isAppContents(webContents) && requestingOrigin.startsWith("file://");
     return isLocalApp && (permission === "media" || permission === "geolocation");
   });
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
-    const isLocalApp = webContents === mainWindow?.webContents && webContents.getURL().startsWith("file://");
+    const isLocalApp = isAppContents(webContents) && webContents.getURL().startsWith("file://");
     callback(isLocalApp && (permission === "media" || permission === "geolocation"));
   });
   // OpenStreetMap's public raster service requires a stable, identifiable
@@ -373,24 +389,73 @@ function wireCameraPermission() {
   );
 }
 
+const WINDOW_PREFS = {
+  preload: path.join(__dirname, "preload.js"),
+  contextIsolation: true,
+  nodeIntegration: false,
+  sandbox: true,
+};
+
+// External links (news headlines, map attribution) open in the system browser,
+// never in an app window; anything else is denied.
+function lockNavigation(win: BrowserWindow) {
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https:\/\//i.test(url)) void shell.openExternal(url);
+    return { action: "deny" };
+  });
+  win.webContents.on("will-navigate", (event, url) => {
+    if (!url.startsWith("file://")) event.preventDefault();
+  });
+}
+
+const CLASSIC_INDEX = path.join(__dirname, "renderer", "index.html");
+const REACT_INDEX = path.join(__dirname, "..", "ui", "index.html");
+
 function createWindow() {
   mainWindow = new BrowserWindow({
+    width: 1360,
+    height: 860,
+    minWidth: 960,
+    minHeight: 640,
+    title: "Proxima",
+    autoHideMenuBar: true,
+    backgroundColor: "#050a14",
+    webPreferences: WINDOW_PREFS,
+  });
+  lockNavigation(mainWindow);
+  // Closing the main window quits the app (the classic window is auxiliary).
+  mainWindow.on("closed", () => { mainWindow = null; app.quit(); });
+
+  // `electron . --classic` forces the old dashboard; it is also the fallback
+  // if the React shell hasn't been built yet.
+  const forceClassic = process.argv.includes("--classic");
+  if (!forceClassic && fs.existsSync(REACT_INDEX)) {
+    void mainWindow.loadFile(REACT_INDEX);
+    return;
+  }
+  if (!forceClassic) console.warn("dist/ui not found — loading the classic dashboard. Run `npm run build` to build the new one.");
+  void mainWindow.loadFile(CLASSIC_INDEX);
+}
+
+function openClassic(view: "camera" | "studio") {
+  if (classicWindow && !classicWindow.isDestroyed()) {
+    classicWindow.focus();
+    void classicWindow.loadFile(CLASSIC_INDEX, { hash: view });
+    return;
+  }
+  classicWindow = new BrowserWindow({
     width: 1180,
     height: 760,
     minWidth: 900,
     minHeight: 640,
-    title: "Proxima",
+    title: "Proxima (classic)",
     autoHideMenuBar: true,
     backgroundColor: "#070a12",
-    webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
+    webPreferences: WINDOW_PREFS,
   });
-
-  mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
+  lockNavigation(classicWindow);
+  classicWindow.on("closed", () => { classicWindow = null; });
+  void classicWindow.loadFile(CLASSIC_INDEX, { hash: view });
 }
 
 app.whenReady().then(async () => {

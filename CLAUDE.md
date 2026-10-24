@@ -72,13 +72,16 @@ happened, what is confirmed vs. not, and the next goal), then
 `docs/project-status.md` for milestone status and the remaining external
 setup and real-machine gates.
 
-**Next goal: move the dashboard UI off Electron** (React front end;
-Tauri or React-in-Electron — an open decision for the user). The core
-(`src/core`, `src/commands`) is UI-agnostic; only `src/electron/` and one
-`utilityProcess` call in `src/core/stt.ts` import Electron. Details and the
-decision points are in `handoff.md`. Until that migration lands, the
-Electron dashboard is the supported UI: it is split into six pages (Home,
-Camera, Memory & Log, System, Tools, 3D Studio) selected from the sidebar.
+**Dashboard:** the React shell in `ui/` (Vite + React + TypeScript, built
+to `dist/ui/` by `npm run build`) is now the default UI, running inside
+Electron. The old vanilla renderer in `src/electron/renderer/` remains for
+hand tracking and 3D Studio (opened from the new shell in a second window)
+and as `npm run dashboard:classic`. The core (`src/core`, `src/commands`)
+stays UI-agnostic; only `src/electron/` and one `utilityProcess` call in
+`src/core/stt.ts` import Electron. The UI↔core contract is
+`ui/src/bridge/types.ts`; see `handoff.md` ("React shell") for what is and
+isn't ported. Pages: Dashboard, Camera, Memory & Log, System, Tools,
+3D Studio.
 
 Milestones 1–9 are recorded as confirmed on the user's Windows machine.
 Milestone 10 is partly complete: file/script tools, memory, and stock

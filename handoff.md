@@ -18,10 +18,9 @@ below; the status doc gets reconciled when the migration starts.
   "built vs confirmed on the real machine" status is in
   `docs/project-status.md` — that distinction still applies, and several
   items there are still awaiting real-machine confirmation.
-- **Branch:** all current work is on `ui-cleanup` (pushed with
-  `git push -u origin ui-cleanup`). GitHub's `main` is still the older
-  pre-"Complete Proxima integration slices" state (`ae3594a`). Merging
-  `ui-cleanup` into `main` has not been done — the user chose to wait.
+- **Branch:** `ui-cleanup` is merged into `main` (`main` was at `5d37b6a`
+  when the React shell started). The React dashboard shell is on the branch
+  `react-shell` — see "React shell" below.
 - **Repo:** `github.com/YatharthJorwal/Proxima-new` (public — never commit
   `.env`, API keys, or tokens). Local folder: `E:\Project Proxima\core`.
   The user delivers/receives patches as files (`git apply --whitespace=fix
@@ -52,6 +51,46 @@ below; the status doc gets reconciled when the migration starts.
    `docs/project-status.md`, `docs/architecture.md`, `docs/decisions.md`,
    `docs/workflows.md`). The old browser-automation `handoff.md` was deleted
    by the previous agent; its still-relevant content is summarized below.
+
+## React shell (branch `react-shell`)
+
+The user chose the "React renderer in Electron" route and gave a reference
+image for the look (dark navy, glowing geodesic orb in the centre, thinking
+process / input / output on the left, devices / activity / map on the right).
+
+- **Where:** `ui/` (Vite + React + TypeScript, one `package.json` at the repo
+  root). `npm run build` also runs `npm run build:ui`, which writes
+  `dist/ui/`. `main.ts` loads `dist/ui/index.html`; `npm run dashboard:classic`
+  (`electron . --classic`) loads the old renderer instead, and it is also the
+  automatic fallback if `dist/ui` is missing.
+- **Contract:** `ui/src/bridge/types.ts` lists every engine event and
+  `window.proxy` verb the UI uses. `ui/src/bridge/engineState.ts` is a pure
+  reducer (tested in `engineState.test.ts`). `ui/src/bridge/store.ts`
+  subscribes at module load, BEFORE React renders — `ready` and
+  `log-history` are sent once and are dropped if nothing is listening yet.
+- **Pages (same six as before):** Dashboard, Camera, Memory & Log, System,
+  Tools, 3D Studio, plus the Settings modal. Alt+1..6 switches pages, `/`
+  focuses the input.
+- **Not ported on purpose** (the user said to wait on unconfirmed features):
+  hand tracking / pinch trigger (Camera) and the whole 3D Studio still run in
+  the classic renderer. The Camera and 3D Studio pages in the new shell have a
+  button that opens the classic dashboard in a second window
+  (`proxy:open-classic`, only `camera` / `studio` accepted, via the
+  `#camera` / `#studio` hash). That window gets no engine events, so nothing
+  is logged twice. Also untouched: browser automation (M10 Part E) and the
+  local-model question.
+- **Real signals only:** the reference image's "Ongoing projects", battery
+  percentages, user avatar and "neural network activity" have no data source
+  in Proxima, so they are not shown. The orb, steps, devices, system monitor,
+  log and map all come from real events.
+- **Settings labels:** the two "typos" in the earlier note do not exist in the
+  source (labels read "Chrome profile directory" and "Max wait for speech
+  (ms)"). The visible glitch was that the field list interleaved groups, so
+  "Storage" and "Voice detection" headings appeared twice. Both Settings
+  screens now group each section once.
+- **Not verified here:** everything was rendered in Electron under a virtual
+  display with a mock bridge, never against the real engine, microphone,
+  camera or Windows. Check it on the real machine.
 
 ## The next goal: move the UI off Electron
 

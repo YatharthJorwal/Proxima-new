@@ -1653,6 +1653,10 @@ const SETTINGS_FIELDS = [
   { group: "Speech recognition", key: "PROXY_WHISPER_CPP_MODEL", label: "GGML model file path (optional)", type: "text" },
   { group: "Voice detection", key: "PROXY_DOUBLE_CLAP_ENABLED", label: "Always listen for double-clap trigger", type: "select" },
   { group: "Voice detection", key: "PROXY_DOUBLE_CLAP_THRESHOLD", label: "Double-clap sensitivity threshold", type: "number" },
+  { group: "Voice detection", key: "PROXY_VAD_MAX_MS", label: "Max recording length (ms)", type: "number" },
+  { group: "Voice detection", key: "PROXY_VAD_MAX_WAIT_MS", label: "Max wait for speech (ms)", type: "number" },
+  { group: "Voice detection", key: "PROXY_VAD_SILENCE_MS", label: "Silence to auto-stop (ms)", type: "number" },
+  { group: "Voice detection", key: "PROXY_VAD_THRESHOLD", label: "Silence threshold", type: "number" },
   { group: "Gmail", key: "GMAIL_CLIENT_ID", label: "Client ID", type: "text" },
   { group: "Gmail", key: "GMAIL_CLIENT_SECRET", label: "Client secret", type: "password" },
   { group: "Gmail", key: "GMAIL_REFRESH_TOKEN", label: "Refresh token", type: "password" },
@@ -1670,13 +1674,9 @@ const SETTINGS_FIELDS = [
   { group: "Assistant", key: "PROXY_ORCHESTRATOR_MAX_STEPS", label: "Max tool steps per request", type: "number" },
   { group: "Assistant", key: "PROXY_SCRIPT_TIMEOUT_MS", label: "Script timeout (ms)", type: "number" },
   { group: "Storage", key: "PROXY_WORKSPACE_DIR", label: "Workspace directory", type: "text" },
-  { group: "Browser automation", key: "PROXY_CHROME_PROFILE_DIR", label: "Chrome profile directory", type: "text" },
   { group: "Storage", key: "PROXY_MEMORY_FILE", label: "Memory file path", type: "text" },
   { group: "Storage", key: "PROXY_SESSION_LOG_FILE", label: "Session log file path", type: "text" },
-  { group: "Voice detection", key: "PROXY_VAD_MAX_MS", label: "Max recording length (ms)", type: "number" },
-  { group: "Voice detection", key: "PROXY_VAD_MAX_WAIT_MS", label: "Max wait for speech (ms)", type: "number" },
-  { group: "Voice detection", key: "PROXY_VAD_SILENCE_MS", label: "Silence to auto-stop (ms)", type: "number" },
-  { group: "Voice detection", key: "PROXY_VAD_THRESHOLD", label: "Silence threshold", type: "number" },
+  { group: "Browser automation", key: "PROXY_CHROME_PROFILE_DIR", label: "Chrome profile directory", type: "text" },
 ];
 
 const settingsBtn = document.getElementById("settingsBtn");
@@ -1830,3 +1830,9 @@ for (const item of sidebar.querySelectorAll(".sidebar-item[data-view]")) {
     }
   });
 }
+
+// Deep link from the React shell: index.html#camera / #studio opens that page.
+// showView() ignores names that aren't a real page.
+const initialView = location.hash.slice(1);
+if (initialView) showView(initialView);
+window.addEventListener("hashchange", () => showView(location.hash.slice(1)));
