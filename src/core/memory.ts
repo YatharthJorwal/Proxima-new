@@ -37,7 +37,11 @@ export interface MemoryFact {
   id: string;
   text: string;
   timestamp: string;
+  /** Written or edited by the user. Automatic pruning removes unpinned facts first. */
+  pinned?: boolean;
 }
+
+export const MAX_FACT_LENGTH = 300;
 
 // Same env-override-with-sane-default pattern as fileTools.ts's
 // PROXY_WORKSPACE_DIR - but deliberately NOT inside the workspace folder
@@ -103,9 +107,22 @@ async function addFacts(newFactTexts: string[]): Promise<void> {
 
   if (additions.length === 0) return;
 
-  const combined = [...existing, ...additions];
-  const trimmed = combined.length > MAX_FACTS ? combined.slice(combined.length - MAX_FACTS) : combined;
-  await saveFacts(trimmed);
+  await saveFacts(pruneFacts([...existing, ...additions]));
+}
+
+/**
+ * Keeps at most MAX_FACTS. Oldest unpinned facts go first, so anything the
+ * user wrote or edited by hand is never silently pushed out by automatic
+ * extraction. If everything left is pinned, the newest additions are dropped.
+ */
+export function pruneFacts(facts: MemoryFact[]): MemoryFact[] {
+  const out = [...facts];
+  while (out.length > MAX_FACTS) {
+    const idx = out.findIndex((f) => !f.pinned);
+    if (idx === -1) return out.slice(0, MAX_FACTS);
+    out.splice(idx, 1);
+  }
+  return out;
 }
 
 /** Exposed for recall_facts.ts (commands/memory.ts) - the only other consumer of stored facts. */
@@ -116,6 +133,49 @@ export async function getStoredFacts(): Promise<MemoryFact[]> {
 /** Explicit user control from the dashboard's Memory panel. */
 export async function clearStoredFacts(): Promise<void> {
   await saveFacts([]);
+}
+
+export type MemoryEditResult = { ok: true; facts: MemoryFact[] } | { ok: false; error: string };
+
+function cleanFactText(text: unknown): string | null {
+  if (typeof text !== "string") return null;
+  const t = text.replace(/\s+/g, " ").trim();
+  return t.length > 0 && t.length <= MAX_FACT_LENGTH ? t : null;
+}
+
+/** The user typed a fact by hand. Pinned so automatic pruning never removes it. */
+export async function addManualFact(text: unknown): Promise<MemoryEditResult> {
+  const clean = cleanFactText(text);
+  if (!clean) return { ok: false, error: `A fact must be 1 to ${MAX_FACT_LENGTH} characters.` };
+  const facts = await loadFacts();
+  if (facts.some((f) => f.text === clean)) return { ok: false, error: "That fact is already saved." };
+  if (facts.filter((f) => f.pinned).length >= MAX_FACTS) return { ok: false, error: `You already have ${MAX_FACTS} saved facts of your own. Delete one first.` };
+  const next = pruneFacts([...facts, { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, text: clean, timestamp: new Date().toISOString(), pinned: true }]);
+  await saveFacts(next);
+  return { ok: true, facts: next };
+}
+
+/** Edit a fact in place. An edited fact becomes the user's own (pinned). */
+export async function updateStoredFact(id: unknown, text: unknown): Promise<MemoryEditResult> {
+  const clean = cleanFactText(text);
+  if (!clean) return { ok: false, error: `A fact must be 1 to ${MAX_FACT_LENGTH} characters.` };
+  const facts = await loadFacts();
+  const idx = facts.findIndex((f) => f.id === id);
+  if (idx === -1) return { ok: false, error: "That fact no longer exists." };
+  if (facts.some((f, i) => i !== idx && f.text === clean)) return { ok: false, error: "Another saved fact already says that." };
+  const next = facts.map((f, i) => (i === idx ? { ...f, text: clean, pinned: true } : f));
+  await saveFacts(next);
+  return { ok: true, facts: next };
+}
+
+/** Delete only the chosen facts (unknown ids are ignored). */
+export async function deleteStoredFacts(ids: unknown): Promise<MemoryEditResult> {
+  if (!Array.isArray(ids) || ids.some((i) => typeof i !== "string")) return { ok: false, error: "Nothing was selected." };
+  const drop = new Set(ids as string[]);
+  const facts = await loadFacts();
+  const next = facts.filter((f) => !drop.has(f.id));
+  await saveFacts(next);
+  return { ok: true, facts: next };
 }
 
 const EXTRACTION_SYSTEM_PROMPT = `You analyze a single exchange between a user and their local voice

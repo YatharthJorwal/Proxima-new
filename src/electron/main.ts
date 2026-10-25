@@ -55,7 +55,8 @@
 
 import "dotenv/config";
 import { getEffectiveSettings, saveSettings, SettingsMap, SETTINGS_KEYS } from "../core/settings";
-import { app, BrowserWindow, globalShortcut, ipcMain, session } from "electron";
+import { app, BrowserWindow, globalShortcut, ipcMain, session, shell, WebContents } from "electron";
+import * as fs from "fs";
 import * as path from "path";
 import { ProxyEngine, RouteInfo } from "../core/engine";
 import { appendLogEntry, loadLogHistory, clearLogHistory } from "../core/sessionLog";
@@ -65,7 +66,9 @@ import { fetchNews } from "../commands/news";
 import { startIPhoneWebhook, stopIPhoneWebhook } from "../commands/iphoneWebhook";
 import { DoubleClapDetector } from "../core/doubleClap";
 import { chat } from "../core/llm";
-import { clearStoredFacts, getStoredFacts } from "../core/memory";
+import { addManualFact, clearStoredFacts, deleteStoredFacts, getStoredFacts, updateStoredFact } from "../core/memory";
+import { getInstructions, setInstructions } from "../core/instructions";
+import { planModelEdit } from "../core/modelOps";
 
 const HOTKEY = process.env.PROXY_HOTKEY || "F9";
 const MAX_TYPED_INPUT_LENGTH = 1000;
@@ -76,7 +79,11 @@ const clapDetector = new DoubleClapDetector(() => { void triggerVoiceOrCancel();
 let voiceTriggerStarting = false;
 
 function send(channel: string, payload?: unknown) {
-  mainWindow?.webContents.send(channel, payload);
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+}
+
+function isAppContents(contents: WebContents | null): boolean {
+  return !!contents && contents === mainWindow?.webContents;
 }
 
 // Every engine event gets its own IPC channel, forwarded as-is. This list
@@ -234,6 +241,24 @@ function wireRendererCommands() {
     try { await clearStoredFacts(); return { ok: true }; }
     catch (error) { console.error("Memory clear failed:", error); return { ok: false }; }
   });
+  // Memory editing from the Memory page. Each returns the fresh list (or an
+  // error string) so the UI never has to guess what is stored.
+  ipcMain.handle("proxy:memory-add", (_event, text) => addManualFact(text).catch(() => ({ ok: false, error: "Could not save that fact." })));
+  ipcMain.handle("proxy:memory-update", (_event, id, text) => updateStoredFact(id, text).catch(() => ({ ok: false, error: "Could not save that change." })));
+  ipcMain.handle("proxy:memory-delete", (_event, ids) => deleteStoredFacts(ids).catch(() => ({ ok: false, error: "Could not delete those facts." })));
+  ipcMain.handle("proxy:get-instructions", async () => {
+    try { return { ok: true, text: await getInstructions() }; } catch { return { ok: false, error: "Instructions are unavailable." }; }
+  });
+  ipcMain.handle("proxy:set-instructions", (_event, text) => setInstructions(text).catch(() => ({ ok: false, error: "Could not save the instructions." })));
+  // The news reader's "open in my browser" button. https only.
+  ipcMain.on("proxy:open-external", (_event, url) => {
+    if (typeof url === "string" && url.length < 2000 && /^https:\/\//i.test(url)) void shell.openExternal(url);
+  });
+  // 3D Studio: one JSON plan from the local model, validated in core/modelOps.ts.
+  ipcMain.handle("proxy:plan-model-edit", async (_event, request) => {
+    if (!request || typeof request !== "object") return { ok: false, error: "Invalid request." };
+    return planModelEdit(request, chat as never).catch((error) => { console.error("3D plan failed:", error); return { ok: false, error: "The local model could not produce a plan." }; });
+  });
   ipcMain.handle("proxy:analyze-model", async (_event, imageBase64) => {
     if (typeof imageBase64 !== "string" || imageBase64.length > 2_000_000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(imageBase64)) {
       return { error: "Invalid or oversized model preview image." };
@@ -354,12 +379,17 @@ function wireRendererCommands() {
 // split that finer here) and deny everything else explicitly, same
 // least-privilege instinct as the rest of this app's Electron config.
 function wireCameraPermission() {
+  // The news reader's embedded pages get their own throwaway session with
+  // every permission (camera, mic, location, notifications) denied.
+  const reader = session.fromPartition(READER_PARTITION);
+  reader.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+  reader.setPermissionCheckHandler(() => false);
   session.defaultSession.setPermissionCheckHandler((webContents, permission, requestingOrigin) => {
-    const isLocalApp = webContents === mainWindow?.webContents && requestingOrigin.startsWith("file://");
+    const isLocalApp = isAppContents(webContents) && requestingOrigin.startsWith("file://");
     return isLocalApp && (permission === "media" || permission === "geolocation");
   });
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
-    const isLocalApp = webContents === mainWindow?.webContents && webContents.getURL().startsWith("file://");
+    const isLocalApp = isAppContents(webContents) && webContents.getURL().startsWith("file://");
     callback(isLocalApp && (permission === "media" || permission === "geolocation"));
   });
   // OpenStreetMap's public raster service requires a stable, identifiable
@@ -373,24 +403,75 @@ function wireCameraPermission() {
   );
 }
 
+const READER_PARTITION = "reader"; // in-memory (no "persist:" prefix): cookies are discarded on exit
+
+const WINDOW_PREFS = {
+  webviewTag: true, // used only by the news reader; locked down in will-attach-webview below
+  preload: path.join(__dirname, "preload.js"),
+  contextIsolation: true,
+  nodeIntegration: false,
+  sandbox: true,
+};
+
+// External links (news headlines, map attribution) open in the system browser,
+// never in an app window; anything else is denied.
+function lockNavigation(win: BrowserWindow) {
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https:\/\//i.test(url)) void shell.openExternal(url);
+    return { action: "deny" };
+  });
+  win.webContents.on("will-navigate", (event, url) => {
+    if (!url.startsWith("file://")) event.preventDefault();
+  });
+}
+
+const CLASSIC_INDEX = path.join(__dirname, "renderer", "index.html");
+const REACT_INDEX = path.join(__dirname, "..", "ui", "index.html");
+
+app.on("web-contents-created", (_event, contents) => {
+  if (contents.getType() !== "webview") return;
+  contents.setWindowOpenHandler(({ url }) => {
+    if (/^https:\/\//i.test(url)) void shell.openExternal(url);
+    return { action: "deny" };
+  });
+  contents.on("will-navigate", (event, url) => { if (!/^https:\/\//i.test(url)) event.preventDefault(); });
+});
+
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1180,
-    height: 760,
-    minWidth: 900,
+    width: 1360,
+    height: 860,
+    minWidth: 960,
     minHeight: 640,
     title: "Proxima",
     autoHideMenuBar: true,
-    backgroundColor: "#070a12",
-    webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
+    backgroundColor: "#050a14",
+    webPreferences: WINDOW_PREFS,
   });
+  lockNavigation(mainWindow);
+  // The reader may only host https pages in its own partition, with no
+  // preload script, no Node, a sandbox, and no pop-ups.
+  mainWindow.webContents.on("will-attach-webview", (event, webPreferences, params) => {
+    delete (webPreferences as Record<string, unknown>).preload;
+    delete (webPreferences as Record<string, unknown>).preloadURL;
+    webPreferences.nodeIntegration = false;
+    webPreferences.contextIsolation = true;
+    webPreferences.sandbox = true;
+    params.allowpopups = "false";
+    if (!/^https:\/\//i.test(params.src ?? "") || params.partition !== READER_PARTITION) event.preventDefault();
+  });
+  // Closing the main window quits the app.
+  mainWindow.on("closed", () => { mainWindow = null; app.quit(); });
 
-  mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
+  // `electron . --classic` forces the old dashboard; it is also the fallback
+  // if the React shell hasn't been built yet.
+  const forceClassic = process.argv.includes("--classic");
+  if (!forceClassic && fs.existsSync(REACT_INDEX)) {
+    void mainWindow.loadFile(REACT_INDEX);
+    return;
+  }
+  if (!forceClassic) console.warn("dist/ui not found — loading the classic dashboard. Run `npm run build` to build the new one.");
+  void mainWindow.loadFile(CLASSIC_INDEX);
 }
 
 app.whenReady().then(async () => {
