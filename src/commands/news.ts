@@ -5,6 +5,8 @@ export interface NewsItem {
   link: string;
   published: string;
   source: string;
+  /** https image URL from the feed (thumbnail or enclosure), or "" when the item has none. */
+  image: string;
 }
 
 const FEEDS = [
@@ -26,11 +28,25 @@ function field(block: string, name: string): string {
   return match ? decodeXml(match[1]) : "";
 }
 
-async function readFeed(feed: (typeof FEEDS)[number], signal: AbortSignal): Promise<NewsItem[]> {
-  const response = await fetch(feed.url, { signal, headers: { accept: "application/rss+xml, application/xml, text/xml" } });
-  if (!response.ok) throw new Error(`${feed.name} returned HTTP ${response.status}`);
-  const xml = (await response.text()).slice(0, 2_000_000);
-  return [...xml.matchAll(/<item(?:\s[^>]*)?>([\s\S]*?)<\/item>/gi)].slice(0, 30).map(([, block]) => {
+/** First https image URL the item offers: media:thumbnail, media:content, or an image enclosure. */
+export function itemImage(block: string): string {
+  const tags = block.match(/<(?:media:thumbnail|media:content|enclosure)\b[^>]*>/gi) ?? [];
+  for (const tag of tags) {
+    if (/^<(?:media:content|enclosure)/i.test(tag) && /\btype\s*=\s*["'](?!image\/)/i.test(tag)) continue; // audio/video
+    if (/^<media:content/i.test(tag) && /\bmedium\s*=\s*["'](?!image)/i.test(tag)) continue;
+    const url = tag.match(/\burl\s*=\s*["']([^"']+)["']/i)?.[1];
+    if (!url || url.length > 600) continue;
+    try {
+      const parsed = new URL(url.replace(/&amp;/g, "&"));
+      if (parsed.protocol === "https:") return parsed.href;
+    } catch { /* skip malformed */ }
+  }
+  return "";
+}
+
+/** Pure RSS parsing (exported for tests): up to 30 items with a title and an https link. */
+export function parseFeed(xml: string, sourceName: string): NewsItem[] {
+  return [...xml.slice(0, 2_000_000).matchAll(/<item(?:\s[^>]*)?>([\s\S]*?)<\/item>/gi)].slice(0, 30).map(([, block]) => {
     const title = field(block, "title");
     const link = field(block, "link");
     let safeLink = "";
@@ -40,9 +56,16 @@ async function readFeed(feed: (typeof FEEDS)[number], signal: AbortSignal): Prom
       summary: field(block, "description").slice(0, 800),
       link: safeLink,
       published: field(block, "pubDate"),
-      source: feed.name,
+      source: sourceName,
+      image: itemImage(block),
     };
   }).filter((item) => item.title && item.link);
+}
+
+async function readFeed(feed: (typeof FEEDS)[number], signal: AbortSignal): Promise<NewsItem[]> {
+  const response = await fetch(feed.url, { signal, headers: { accept: "application/rss+xml, application/xml, text/xml" } });
+  if (!response.ok) throw new Error(`${feed.name} returned HTTP ${response.status}`);
+  return parseFeed(await response.text(), feed.name);
 }
 
 export async function fetchNews(): Promise<NewsItem[]> {

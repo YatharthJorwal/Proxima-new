@@ -129,3 +129,25 @@ describe("engine state", () => {
     expect(run([["present-devices", [{ name: "Mic", kind: "AudioEndpoint", status: "OK" }]]]).devices).toHaveLength(1);
   });
 });
+
+import { pipelineStage } from "./pipeline";
+
+describe("pipeline stage (drives the neural chain)", () => {
+  const stageAfter = (events: [EngineEventName, unknown?][]) => pipelineStage(run(events));
+  it("is -1 when nothing is running", () => {
+    expect(pipelineStage(initialState())).toBe(-1);
+    expect(stageAfter([["transcribed", "hi"], ["reply", "yo"], ["idle"]])).toBe(-1);
+  });
+  it("follows the real stages in order", () => {
+    expect(stageAfter([["listening", { maxMs: 1000 }]])).toBe(0);
+    expect(stageAfter([["listening", { maxMs: 1000 }], ["transcribing"]])).toBe(1);
+    expect(stageAfter([["transcribed", "x"]])).toBe(1);
+    expect(stageAfter([["transcribed", "x"], ["deciding", "fast"]])).toBe(2);
+    expect(stageAfter([["transcribed", "x"], ["deciding", "fast"], ["tool-start", "t"]])).toBe(3);
+    expect(stageAfter([["transcribed", "x"], ["deciding", "fast"], ["tool-start", "t"], ["tool-result", { name: "t", result: "r" }], ["responding"]])).toBe(4);
+    expect(stageAfter([["transcribed", "x"], ["responding"], ["reply", "r"], ["speaking"]])).toBe(5);
+  });
+  it("treats a pending confirmation as the action stage", () => {
+    expect(stageAfter([["transcribed", "x"], ["awaiting-confirmation", { path: "a.bat" }]])).toBe(3);
+  });
+});

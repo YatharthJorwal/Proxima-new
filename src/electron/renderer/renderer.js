@@ -1830,9 +1830,3 @@ for (const item of sidebar.querySelectorAll(".sidebar-item[data-view]")) {
     }
   });
 }
-
-// Deep link from the React shell: index.html#camera / #studio opens that page.
-// showView() ignores names that aren't a real page.
-const initialView = location.hash.slice(1);
-if (initialView) showView(initialView);
-window.addEventListener("hashchange", () => showView(location.hash.slice(1)));

@@ -133,13 +133,24 @@ for (const file of ["vision_wasm_internal.js", "vision_wasm_internal.wasm"]) {
   copyRecursive(path.join(mediapipeDir, "wasm", file), path.join(mediapipeVendorDir, "wasm", file));
 }
 
+// The React dashboard (dist/ui, built by Vite just before this script runs)
+// imports @mediapipe/tasks-vision from npm, but the WASM runtime and the model
+// are plain files fetched at runtime, so they are copied next to index.html.
+const uiMediapipeDir = path.join(root, "dist", "ui", "vendor", "mediapipe");
+if (fs.existsSync(path.join(root, "dist", "ui"))) {
+  for (const file of ["vision_wasm_internal.js", "vision_wasm_internal.wasm"]) {
+    copyRecursive(path.join(mediapipeDir, "wasm", file), path.join(uiMediapipeDir, "wasm", file));
+  }
+}
+
 const modelSrc = path.join(root, "models", "hand_landmarker.task");
 if (fs.existsSync(modelSrc)) {
   copyRecursive(modelSrc, path.join(mediapipeVendorDir, "hand_landmarker.task"));
+  if (fs.existsSync(path.join(root, "dist", "ui"))) copyRecursive(modelSrc, path.join(uiMediapipeDir, "hand_landmarker.task"));
 } else {
   console.warn(
     "\n[copy-assets] models/hand_landmarker.task not found — the dashboard's " +
-      "Camera card will show a 'run npm run setup:cv' message instead of " +
+      "Camera page will show a 'run npm run setup:cv' message instead of " +
       "tracking hands. Run `npm run setup:cv` once to fix this.\n"
   );
 }

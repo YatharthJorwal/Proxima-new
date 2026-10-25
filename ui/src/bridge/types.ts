@@ -25,6 +25,12 @@ export interface SystemUsage {
   usedMemPercent: number;
   topByMemory: { name: string; memMB: number }[];
   topByCpuTime: { name: string; cpuSeconds: number }[];
+  /** null / missing = the counters could not be read (shown as unavailable, never as zeros). */
+  disk?: { readBytesPerSec: number; writeBytesPerSec: number; busyPercent: number } | null;
+  network?: { rxBytesPerSec: number; txBytesPerSec: number } | null;
+  cpuCores?: number | null;
+  processCount?: number | null;
+  uptimeSeconds?: number | null;
 }
 
 export interface PresentDevice {
@@ -39,13 +45,19 @@ export interface NewsItem {
   link: string;
   published: string;
   source: string;
+  /** https image URL from the feed, or "". */
+  image: string;
 }
 
 export interface MemoryFact {
   id: string;
   text: string;
   timestamp: string;
+  /** Written or edited by you; automatic pruning never removes these first. */
+  pinned?: boolean;
 }
+
+export type MemoryEdit = { ok: true; facts: MemoryFact[] } | { ok: false; error: string };
 
 export interface LogEntry {
   kind: string;
@@ -96,7 +108,17 @@ export const ENGINE_EVENT_NAMES: EngineEventName[] = [
 ];
 
 export type SettingsValues = Record<string, string>;
-export type ClassicView = "camera" | "studio";
+
+export type { SceneObjectSummary, StudioOp } from "../../../src/core/modelOps";
+import type { SceneObjectSummary, StudioOp } from "../../../src/core/modelOps";
+
+export interface PlanRequest {
+  prompt: string;
+  sceneUnit?: string;
+  scene: SceneObjectSummary[];
+  selected: number | null;
+}
+export type PlanResult = { ok: true; ops: StudioOp[]; summary: string } | { ok: false; error: string };
 
 export interface ProximaBridge {
   on<K extends EngineEventName>(channel: K, callback: (payload: EngineEventPayloads[K]) => void): (() => void) | undefined;
@@ -109,8 +131,17 @@ export interface ProximaBridge {
   fetchNews(): Promise<NewsItem[] | { error: string }>;
   getMemory(): Promise<MemoryFact[] | { error: string }>;
   clearMemory(): Promise<{ ok: boolean }>;
-  /** Opens the classic dashboard on a page that hasn't moved to the new shell yet. */
-  openClassic(view: ClassicView): void;
+  addMemory(text: string): Promise<MemoryEdit>;
+  updateMemory(id: string, text: string): Promise<MemoryEdit>;
+  deleteMemory(ids: string[]): Promise<MemoryEdit>;
+  getInstructions(): Promise<{ ok: true; text: string } | { ok: false; error: string }>;
+  setInstructions(text: string): Promise<{ ok: true; text: string } | { ok: false; error: string }>;
+  /** Opens an https URL in the system browser. */
+  openExternal(url: string): void;
+  /** Sends a PNG of the 3D view (base64, no data: prefix) to the local vision model. */
+  analyzeModelPreview(imageBase64: string): Promise<{ text?: string; error?: string }>;
+  /** One validated JSON plan of 3D edit operations from the local model. */
+  planModelEdit(request: PlanRequest): Promise<PlanResult>;
 }
 
 declare global {

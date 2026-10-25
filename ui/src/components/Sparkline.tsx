@@ -1,16 +1,18 @@
-import type { UsagePoint } from "../bridge/engineState";
+/** One or more thin lines from real samples. Draws nothing until there are two samples. */
+export interface SparkSeries { values: number[]; cls: string }
 
-/** Two thin lines (CPU, memory) from real samples. Draws nothing until there are two samples. */
-export function Sparkline({ points, height = 44 }: { points: UsagePoint[]; height?: number }) {
-  if (points.length < 2) return <div className="spark spark-empty" style={{ height }}>Collecting samples…</div>;
+export function Spark({ series, height = 44, max, label }: { series: SparkSeries[]; height?: number; max?: number; label: string }) {
+  const n = Math.min(...series.map((s) => s.values.length));
+  if (!Number.isFinite(n) || n < 2) return <div className="spark spark-empty" style={{ height }}>Collecting samples…</div>;
   const w = 200;
-  const x = (i: number) => (i / (points.length - 1)) * w;
-  const y = (v: number) => height - 3 - (v / 100) * (height - 6);
-  const path = (key: "cpu" | "mem") => points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)} ${y(p[key]).toFixed(1)}`).join(" ");
+  const top = max ?? Math.max(1, ...series.flatMap((s) => s.values));
+  const x = (i: number) => (i / (n - 1)) * w;
+  const y = (v: number) => height - 3 - (Math.min(v, top) / top) * (height - 6);
   return (
-    <svg className="spark" viewBox={`0 0 ${w} ${height}`} preserveAspectRatio="none" style={{ height }} role="img" aria-label="CPU and memory over the last samples">
-      <path d={path("mem")} className="spark-mem" />
-      <path d={path("cpu")} className="spark-cpu" />
+    <svg className="spark" viewBox={`0 0 ${w} ${height}`} preserveAspectRatio="none" style={{ height }} role="img" aria-label={label}>
+      {series.map((s, k) => (
+        <path key={k} className={s.cls} d={s.values.slice(-n).map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(" ")} />
+      ))}
     </svg>
   );
 }

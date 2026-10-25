@@ -112,7 +112,7 @@ export function Orb({ state, flashAt }: { state: OrbState; flashAt: number }) {
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 50);
-    camera.position.set(0, 0.35, 6.2);
+    camera.position.set(0, 0.35, 7.6);
     camera.lookAt(0, 0, 0);
     const { group, rings, disposables, tinted } = build();
     scene.add(rings, group);

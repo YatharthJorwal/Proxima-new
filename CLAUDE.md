@@ -74,13 +74,13 @@ setup and real-machine gates.
 
 **Dashboard:** the React shell in `ui/` (Vite + React + TypeScript, built
 to `dist/ui/` by `npm run build`) is now the default UI, running inside
-Electron. The old vanilla renderer in `src/electron/renderer/` remains for
-hand tracking and 3D Studio (opened from the new shell in a second window)
-and as `npm run dashboard:classic`. The core (`src/core`, `src/commands`)
+Electron, including the Camera (hand tracking, pinch trigger) and 3D Studio
+pages. The old vanilla renderer in `src/electron/renderer/` stays only as the
+fallback `npm run dashboard:classic`. The core (`src/core`, `src/commands`)
 stays UI-agnostic; only `src/electron/` and one `utilityProcess` call in
 `src/core/stt.ts` import Electron. The UI↔core contract is
-`ui/src/bridge/types.ts`; see `handoff.md` ("React shell") for what is and
-isn't ported. Pages: Dashboard, Camera, Memory & Log, System, Tools,
+`ui/src/bridge/types.ts`; see `handoff.md` ("React shell") for what is built
+and what is confirmed on the real machine. Pages: Dashboard, Camera, Memory & Log, System, Tools,
 3D Studio.
 
 Milestones 1–9 are recorded as confirmed on the user's Windows machine.

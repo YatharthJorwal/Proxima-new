@@ -5,7 +5,7 @@
   "private": true,
   "main": "dist/electron/main.js",
   "scripts": {
-    "build": "tsc && node scripts/copy-assets.js && npm run build:ui",
+    "build": "tsc && npm run build:ui && node scripts/copy-assets.js",
     "build:ui": "vite build --config ui/vite.config.mjs",
     "typecheck:ui": "tsc -p ui/tsconfig.json --noEmit",
     "start": "ts-node src/core/assistant.ts",

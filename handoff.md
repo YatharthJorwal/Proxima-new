@@ -71,14 +71,75 @@ process / input / output on the left, devices / activity / map on the right).
 - **Pages (same six as before):** Dashboard, Camera, Memory & Log, System,
   Tools, 3D Studio, plus the Settings modal. Alt+1..6 switches pages, `/`
   focuses the input.
-- **Not ported on purpose** (the user said to wait on unconfirmed features):
-  hand tracking / pinch trigger (Camera) and the whole 3D Studio still run in
-  the classic renderer. The Camera and 3D Studio pages in the new shell have a
-  button that opens the classic dashboard in a second window
-  (`proxy:open-classic`, only `camera` / `studio` accepted, via the
-  `#camera` / `#studio` hash). That window gets no engine events, so nothing
-  is logged twice. Also untouched: browser automation (M10 Part E) and the
-  local-model question.
+- **Camera and 3D Studio are now native pages** (they were opened in a second
+  classic window in the first version of the shell; that bridge is gone).
+  - Camera: `ui/src/vision/cameraStore.ts` is a module-level store, so hand
+    tracking and the pinch trigger keep running on other pages.
+    `pinch.ts` and `mapper.ts` hold the pure, tested logic. MediaPipe is
+    imported lazily; its wasm and `hand_landmarker.task` are copied into
+    `dist/ui/vendor/mediapipe` by `scripts/copy-assets.js`, which now runs
+    AFTER `vite build` (Vite empties `dist/ui`). Run `npm run setup:cv` once
+    for the model. Detection is capped at ~30 fps.
+  - 3D Studio: `ui/src/studio/StudioScene.ts` is one persistent scene (your
+    model survives switching pages; the canvas is attached/detached). Draw a
+    shape by picking its icon and dragging on the grid (boxes: footprint,
+    release, move up/down, click for height; round shapes grow from the
+    centre; a single click drops a 1-unit shape). Navigation is Blender-style:
+    middle-drag orbit, Shift+middle or right-drag pan, wheel zoom, Alt+drag
+    orbit, left-drag on empty space orbits, plus orbit/pan/zoom handles for
+    trackpads and the ViewHelper axis gizmo (top right). Delete has a button,
+    the Delete key, and a one-level undo (Ctrl+Z). G/R/S switch gizmo modes,
+    F frames the selection, numpad 1/3/7 snap views, Esc cancels.
+  - Import/export STL, OBJ import, union/subtract, measure, "Describe" and the
+    local-model edit box were ported as they were.
+- **Round 3 additions (all on `react-shell`):**
+  - **System page:** eight equal cards (CPU, Memory, Disk, Network, Top memory,
+    Top CPU time, Status, Connected devices). `systemUsage.ts` now also returns
+    disk read/write/busy, network down/up (summed over adapters), core count,
+    process count and Windows uptime from the SAME `Get-Counter` call as CPU.
+    If the extra counters can't be read, the call falls back to CPU only and
+    the UI shows "unavailable" (never zeros). The script is a `String.raw`
+    template so counter-path backslashes reach PowerShell intact; this was
+    run under PowerShell 7 with mocked counters (syntax + both paths) but
+    NOT on real Windows. The source and the escaping are easy to get wrong, so
+    if disk/network show "unavailable", check this first.
+  - **Memory page:** a "Standing instructions" box (`src/core/instructions.ts`,
+    file `~/.proxima/instructions.txt` or `PROXY_INSTRUCTIONS_FILE`, max 2000
+    chars) that is appended to the system prompt on every normal reply (not to
+    internal calls that replace the prompt). Facts can be edited, deleted
+    singly or in bulk, and added by hand; hand-written/edited ones are `pinned`
+    and automatic pruning removes unpinned facts first.
+  - **News and reader:** feeds now carry an https thumbnail (`image`). The
+    Tools page shows the interactive map, then a Reader card (an Electron
+    `<webview>`) under it, and the headline list with thumbnails on the right.
+    Hardening in `main.ts`: `webviewTag` is on, but `will-attach-webview`
+    strips preload, forces sandbox/no Node/no popups and only allows https in
+    the in-memory `reader` partition, whose permission handlers deny
+    everything; guest navigation is limited to https and new windows go to the
+    system browser. CSP `img-src` is now `https:` (thumbnails come from
+    publishers' CDNs).
+  - **Map:** a real slippy map (drag, wheel, double-click, +/- buttons, arrow
+    keys), tile maths in `ui/src/map/tiles.ts` (tested). Nothing is requested
+    until "Browse map" or "Enable location" is clicked.
+  - **Home:** camera and system cards are 4:3, the orb is smaller, the neural
+    chain grows with the window.
+  - **3D Studio tray** (collapsed by default): Ask the model, Arrange
+    (duplicate, circular array, mirror, align), Shape (round corners, drill
+    hole, union/subtract), Objects, History. The model is asked ONCE for a JSON
+    plan (`src/core/modelOps.ts`: tool schema, validator, prompt; IPC
+    `proxy:plan-model-edit`). Every plan is validated against limits and the
+    scene it saw, applied as one undoable step, and rolled back if any step
+    fails. The tray's direct tools go through the same validator. General
+    undo/redo (40 steps) now covers drawing, deleting, transforms, booleans,
+    imports and model edits. The classic dashboard still uses the old
+    `proxy:edit-model-transform` handler.
+- **Neural chain** (Home, bottom left): a 3D layered graph, one layer per
+  pipeline stage (Listen, Understand, Analyze, Act, Respond, Speak). The
+  active layer lights and pulses travel in when the stage changes, driven by
+  `pipelineStage()` in `ui/src/bridge/pipeline.ts`. It shows pipeline stage,
+  not the language model's internals, and is dim and still when idle.
+- **Eye tracking** is scoped in `docs/eye-tracking-scope.md`; nothing is built.
+  Untouched: browser automation (M10 Part E) and the local-model question.
 - **Real signals only:** the reference image's "Ongoing projects", battery
   percentages, user avatar and "neural network activity" have no data source
   in Proxima, so they are not shown. The orb, steps, devices, system monitor,
@@ -88,9 +149,13 @@ process / input / output on the left, devices / activity / map on the right).
   (ms)"). The visible glitch was that the field list interleaved groups, so
   "Storage" and "Voice detection" headings appeared twice. Both Settings
   screens now group each section once.
-- **Not verified here:** everything was rendered in Electron under a virtual
-  display with a mock bridge, never against the real engine, microphone,
-  camera or Windows. Check it on the real machine.
+- **Confirmed on the real machine (by the user):** mic and chat work in the
+  React shell; the System page, Home, Camera and the 3D Studio draw/delete/
+  navigate flow were reviewed from screenshots of the first two rounds. **Not yet confirmed:** the Camera
+  page with real hand tracking and the pinch trigger, the 3D Studio
+  interactions, import/export and the local-model edit box, and the neural
+  chain on real engine events. These were rendered here in Electron under a
+  virtual display with a mock bridge only.
 
 ## The next goal: move the UI off Electron
 

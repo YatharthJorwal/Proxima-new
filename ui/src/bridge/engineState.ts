@@ -47,7 +47,7 @@ export type OutputView =
   | { mode: "reply"; text: string }
   | { mode: "error"; text: string };
 
-export interface UsagePoint { at: number; cpu: number; mem: number }
+export interface UsagePoint { at: number; cpu: number; mem: number; diskRead: number; diskWrite: number; diskBusy: number; netRx: number; netTx: number }
 
 export interface EngineState {
   nextId: number;
@@ -80,7 +80,7 @@ export type Action =
   | { type: "clear-log" };
 
 export const MAX_LOG_LINES = 500;
-export const MAX_USAGE_POINTS = 40;
+export const MAX_USAGE_POINTS = 60;
 
 export function initialState(): EngineState {
   return {
@@ -244,7 +244,12 @@ function reduceEngine(s: EngineState, name: EngineEventName, raw: unknown, now: 
       const u = raw as SystemUsage | null;
       const ok = !!u && typeof u === "object" && Number.isFinite(Number(u.cpuPercent)) && Number.isFinite(Number(u.usedMemPercent));
       if (!ok) return { ...s, usage: null };
-      const point: UsagePoint = { at: now, cpu: Math.max(0, Math.min(100, Number(u.cpuPercent))), mem: Math.max(0, Math.min(100, Number(u.usedMemPercent))) };
+      const pct = (n: number) => Math.max(0, Math.min(100, n));
+      const point: UsagePoint = {
+        at: now, cpu: pct(Number(u.cpuPercent)), mem: pct(Number(u.usedMemPercent)),
+        diskRead: u.disk?.readBytesPerSec ?? 0, diskWrite: u.disk?.writeBytesPerSec ?? 0, diskBusy: pct(u.disk?.busyPercent ?? 0),
+        netRx: u.network?.rxBytesPerSec ?? 0, netTx: u.network?.txBytesPerSec ?? 0,
+      };
       return { ...s, usage: u, usageHistory: [...s.usageHistory, point].slice(-MAX_USAGE_POINTS) };
     }
     case "present-devices":

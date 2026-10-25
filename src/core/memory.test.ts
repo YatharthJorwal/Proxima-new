@@ -27,7 +27,7 @@ const { mockChat, TEST_MEMORY_FILE } = vi.hoisted(() => {
 });
 vi.mock("./llm", () => ({ chat: mockChat }));
 
-import { getStoredFacts, extractAndStoreMemories } from "./memory";
+import { getStoredFacts, extractAndStoreMemories, addManualFact, updateStoredFact, deleteStoredFacts, pruneFacts, MemoryFact } from "./memory";
 
 beforeEach(async () => {
   mockChat.mockReset();
@@ -125,5 +125,43 @@ describe("extractAndStoreMemories", () => {
     await extractAndStoreMemories("x", "y");
 
     expect(mockChat).toHaveBeenCalledWith(expect.objectContaining({ tier: "smart", think: true }));
+  });
+});
+
+describe("editing memory by hand", () => {
+  it("adds a pinned fact, trims it, and rejects duplicates and empties", async () => {
+    const r = await addManualFact("  Likes   dark mode ");
+    expect(r.ok && r.facts[0]).toMatchObject({ text: "Likes dark mode", pinned: true });
+    expect((await addManualFact("Likes dark mode")).ok).toBe(false);
+    expect((await addManualFact("   ")).ok).toBe(false);
+    expect((await addManualFact("x".repeat(301))).ok).toBe(false);
+  });
+
+  it("edits a fact in place, keeps its id, and pins it", async () => {
+    mockChat.mockResolvedValue({ reply: JSON.stringify(["Uses metric units"]) });
+    await extractAndStoreMemories("hi", "hello");
+    const [orig] = await getStoredFacts();
+    const r = await updateStoredFact(orig.id, "Uses imperial units");
+    expect(r.ok).toBe(true);
+    const [after] = await getStoredFacts();
+    expect(after).toMatchObject({ id: orig.id, text: "Uses imperial units", pinned: true });
+    expect((await updateStoredFact("missing", "x")).ok).toBe(false);
+  });
+
+  it("deletes only the selected facts", async () => {
+    await addManualFact("one"); await addManualFact("two"); await addManualFact("three");
+    const facts = await getStoredFacts();
+    const r = await deleteStoredFacts([facts[0].id, facts[2].id, "ghost"]);
+    expect(r.ok && r.facts.map((f) => f.text)).toEqual(["two"]);
+    expect((await deleteStoredFacts("nope")).ok).toBe(false);
+  });
+
+  it("automatic pruning drops unpinned facts first and never the user's own", () => {
+    const mk = (i: number, pinned = false): MemoryFact => ({ id: String(i), text: `f${i}`, timestamp: "t", pinned });
+    const facts = [mk(0, true), ...Array.from({ length: 30 }, (_, i) => mk(i + 1))];
+    const kept = pruneFacts(facts);
+    expect(kept).toHaveLength(30);
+    expect(kept[0].id).toBe("0"); // pinned oldest survives
+    expect(kept.some((f) => f.id === "1")).toBe(false); // oldest unpinned went instead
   });
 });

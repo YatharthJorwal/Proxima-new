@@ -1,10 +1,11 @@
 import type { EngineState } from "../bridge/engineState";
-import { CameraPreview } from "../components/CameraPreview";
+import { CameraCard } from "../components/CameraCard";
 import { DevicesCard } from "../components/DevicesCard";
 import { InputPanel } from "../components/InputPanel";
 import { LogView } from "../components/LogView";
 import { MapCard } from "../components/MapCard";
 import { MonitorCard } from "../components/MonitorCard";
+import { NeuralChain } from "../components/NeuralChain";
 import { Orb } from "../components/Orb";
 import { OutputPanel } from "../components/OutputPanel";
 import { Panel } from "../components/Panel";
@@ -21,6 +22,7 @@ export function HomePage({ state, onPage }: { state: EngineState; onPage: (p: Pa
         <ThinkingPanel state={state} />
         <InputPanel state={state} />
         <OutputPanel state={state} />
+        <NeuralChain state={state} />
       </div>
       <div className="home-col col-center">
         <div className="orb-stage">
@@ -31,7 +33,7 @@ export function HomePage({ state, onPage }: { state: EngineState; onPage: (p: Pa
           </div>
         </div>
         <div className="center-row">
-          <CameraPreview compact />
+          <CameraCard />
           <MonitorCard state={state} />
         </div>
       </div>

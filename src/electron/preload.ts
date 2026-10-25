@@ -14,7 +14,7 @@
  * passthrough, no filesystem/process access. Each verb goes out over
  * ipcRenderer.send or ipcRenderer.invoke to a single fixed channel;
  * main.ts is what actually validates and acts on it, so preload's job
- * here is just "don't expose more than the verbs listed below."
+ * here is just "don't expose more than these verbs."
  */
 
 import { contextBridge, ipcRenderer, IpcRendererEvent } from "electron";
@@ -122,12 +122,13 @@ contextBridge.exposeInMainWorld("proxy", {
   fetchNews: () => ipcRenderer.invoke("proxy:fetch-news"),
   getMemory: () => ipcRenderer.invoke("proxy:get-memory"),
   clearMemory: () => ipcRenderer.invoke("proxy:clear-memory"),
-  // Opens the classic dashboard on a page that hasn't moved to the React
-  // shell yet (main.ts accepts only "camera" and "studio").
-  openClassic: (view: string) => {
-    if (view !== "camera" && view !== "studio") return;
-    ipcRenderer.send("proxy:open-classic", view);
-  },
+  addMemory: (text: string) => ipcRenderer.invoke("proxy:memory-add", text),
+  updateMemory: (id: string, text: string) => ipcRenderer.invoke("proxy:memory-update", id, text),
+  deleteMemory: (ids: string[]) => ipcRenderer.invoke("proxy:memory-delete", ids),
+  getInstructions: () => ipcRenderer.invoke("proxy:get-instructions"),
+  setInstructions: (text: string) => ipcRenderer.invoke("proxy:set-instructions", text),
+  openExternal: (url: string) => { if (typeof url === "string" && /^https:\/\//i.test(url)) ipcRenderer.send("proxy:open-external", url); },
+  planModelEdit: (request: unknown) => ipcRenderer.invoke("proxy:plan-model-edit", request),
   analyzeModelPreview: (imageBase64: string) => ipcRenderer.invoke("proxy:analyze-model", imageBase64),
   editModelTransform: (request: { prompt: string; kind: string; current: { position: { x: number; y: number; z: number }; rotation: { x: number; y: number; z: number }; scale: number } }) =>
     ipcRenderer.invoke("proxy:edit-model-transform", request),

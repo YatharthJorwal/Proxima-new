@@ -10,6 +10,7 @@
  * (latency goals, why same-family models, VRAM budget, etc.).
  */
 
+import { getInstructions, instructionsBlock } from "./instructions";
 import ollama, { Message, Tool } from "ollama";
 
 export type ModelTier = "fast" | "smart";
@@ -66,7 +67,7 @@ as "a user" or "someone who uses this." Address him as "sir" when it
 feels natural, not forced into every sentence. Refer to him by name when
 that's natural too, don't force that either.`;
 
-function buildSystemPrompt(hasTools: boolean): string {
+function buildSystemPrompt(hasTools: boolean, instructions = ""): string {
   const toolGuidance = hasTools
     ? `\n\nYou have tools available to control the user's PC. Only call one when the request clearly asks for it - most things people say to you are ordinary conversation, not commands.
 
@@ -82,7 +83,7 @@ Memory works differently from every tool above: there is no tool that writes, up
   return `You are Proxy (short for Proxima), a local voice assistant running on the user's PC.
 ${PERSONALITY}
 
-About your creator: ${CREATOR_BIO}${toolGuidance}`;
+About your creator: ${CREATOR_BIO}${toolGuidance}${instructionsBlock(instructions)}`;
 }
 
 export interface ToolCall {
@@ -150,7 +151,7 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
     messages: [
       {
         role: "system",
-        content: opts.systemPromptOverride ?? buildSystemPrompt(Boolean(opts.tools && opts.tools.length > 0)),
+        content: opts.systemPromptOverride ?? buildSystemPrompt(Boolean(opts.tools && opts.tools.length > 0), await getInstructions()),
       },
       ...opts.messages,
     ],

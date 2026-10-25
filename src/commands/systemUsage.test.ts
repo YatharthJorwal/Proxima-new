@@ -12,7 +12,7 @@ import { EventEmitter } from "events";
 const { mockSpawn } = vi.hoisted(() => ({ mockSpawn: vi.fn() }));
 vi.mock("child_process", () => ({ spawn: mockSpawn }));
 
-import { fetchSystemUsage, executeGetSystemUsage } from "./systemUsage";
+import { fetchSystemUsage, executeGetSystemUsage, parseUsage } from "./systemUsage";
 
 /** A fake child_process-shaped EventEmitter that emits the given stdout then closes with the given exit code. */
 function fakeProcess(stdout: string, exitCode = 0) {
@@ -115,5 +115,34 @@ describe("executeGetSystemUsage", () => {
 
     const reply = await executeGetSystemUsage();
     expect(reply).toMatch(/something went wrong/i);
+  });
+});
+
+describe("parseUsage (disk and network)", () => {
+  const base = { cpuPercent: 5, totalMemMB: 8000, usedMemMB: 4000, usedMemPercent: 50 };
+
+  it("maps disk and network counters when the script returned them", () => {
+    const u = parseUsage(JSON.stringify({ ...base, diskReadBytesPerSec: 2_000_000, diskWriteBytesPerSec: 500_000, diskBusyPercent: 37.5, netRxBytesPerSec: 1200, netTxBytesPerSec: 300, cpuCores: 16, processCount: 280, uptimeSeconds: 9000 }));
+    expect(u.disk).toEqual({ readBytesPerSec: 2_000_000, writeBytesPerSec: 500_000, busyPercent: 37.5 });
+    expect(u.network).toEqual({ rxBytesPerSec: 1200, txBytesPerSec: 300 });
+    expect([u.cpuCores, u.processCount, u.uptimeSeconds]).toEqual([16, 280, 9000]);
+  });
+
+  it("reports unavailable (null), never zeros, when the extra counters could not be read", () => {
+    const u = parseUsage(JSON.stringify({ ...base, diskReadBytesPerSec: null, diskWriteBytesPerSec: null, netRxBytesPerSec: null, netTxBytesPerSec: null }));
+    expect(u.disk).toBeNull();
+    expect(u.network).toBeNull();
+    expect(u.cpuPercent).toBe(5); // CPU survives
+  });
+
+  it("still parses output from an older script that has none of the new fields", () => {
+    const u = parseUsage(JSON.stringify(base));
+    expect(u.disk).toBeNull();
+    expect(u.cpuCores).toBeNull();
+  });
+
+  it("clamps busy percent (Windows can report over 100) and negative rates", () => {
+    const u = parseUsage(JSON.stringify({ ...base, diskReadBytesPerSec: -5, diskWriteBytesPerSec: 10, diskBusyPercent: 340 }));
+    expect(u.disk).toEqual({ readBytesPerSec: 0, writeBytesPerSec: 10, busyPercent: 100 });
   });
 });

@@ -32,7 +32,9 @@ export function DevicesCard({ state, limit, onViewAll }: { state: EngineState; l
     );
   }
   return (
-    <Panel title="Connected devices" className="devices-card" actions={onViewAll ? <button type="button" className="link-btn" onClick={onViewAll}>View all</button> : undefined}>
+    <Panel title="Connected devices" className={`devices-card${limit ? "" : " scroll"}`}
+      status={Array.isArray(d) && d.length > 0 ? <span className="chip">{d.length}</span> : undefined}
+      actions={onViewAll ? <button type="button" className="link-btn" onClick={onViewAll}>View all</button> : undefined}>
       {body}
     </Panel>
   );
