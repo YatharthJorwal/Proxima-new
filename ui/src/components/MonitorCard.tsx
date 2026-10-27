@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { EngineState, UsagePoint } from "../bridge/engineState";
 import { formatBytesPerSec, formatDuration, formatMB } from "../lib/format";
 import { Panel } from "./Panel";
@@ -100,11 +101,17 @@ export function NetworkCard({ state }: { state: EngineState }) {
   );
 }
 
-export function ProcessCard({ state, by }: { state: EngineState; by: "memory" | "cpu" }) {
+export function ProcessesCard({ state }: { state: EngineState }) {
+  const [by, setBy] = useState<"memory" | "cpu">("memory");
   const u = state.usage;
   const rows = by === "memory" ? u?.topByMemory.map((p) => ({ name: p.name, value: formatMB(p.memMB) })) : u?.topByCpuTime.map((p) => ({ name: p.name, value: formatDuration(p.cpuSeconds) }));
   return (
-    <Panel title={by === "memory" ? "Top memory use" : "Top CPU time"} className="metric" status={by === "cpu" ? <span className="chip" title="Total processor time used since each process started, not what is busy right now">since start</span> : undefined}>
+    <Panel title="Processes" className="metric"
+      status={
+        <div className="seg" role="group" aria-label="Sort processes by">
+          <button type="button" aria-pressed={by === "memory"} onClick={() => setBy("memory")}>Memory</button>
+          <button type="button" aria-pressed={by === "cpu"} onClick={() => setBy("cpu")} title="Total processor time used since each process started, not what is busy right now">CPU time</button>
+        </div>}>
       {rows?.length ? <ul className="proc-list">{rows.slice(0, 8).map((r, i) => <li key={`${r.name}-${i}`}><span>{r.name}</span><span className="num">{r.value}</span></li>)}</ul> : <p className="empty">{u === null ? "No process data." : "Waiting for the first sample…"}</p>}
     </Panel>
   );

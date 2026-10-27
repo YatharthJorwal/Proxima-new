@@ -59,6 +59,17 @@ export interface MemoryFact {
 
 export type MemoryEdit = { ok: true; facts: MemoryFact[] } | { ok: false; error: string };
 
+export interface BtDevice {
+  id: string;
+  name: string;
+  paired: boolean;
+  connected: boolean;
+  kind: "classic" | "le";
+}
+export type BtAction = "pair" | "remove" | "connect" | "disconnect";
+export type BtListResult = { ok: true; devices: BtDevice[] } | { ok: false; error: string };
+export type BtActionResult = { ok: true; message: string } | { ok: false; error: string };
+
 export interface LogEntry {
   kind: string;
   text: string;
@@ -140,6 +151,10 @@ export interface ProximaBridge {
   openExternal(url: string): void;
   /** Sends a PNG of the 3D view (base64, no data: prefix) to the local vision model. */
   analyzeModelPreview(imageBase64: string): Promise<{ text?: string; error?: string }>;
+  btList(): Promise<BtListResult>;
+  btScan(): Promise<BtListResult>;
+  btAction(action: BtAction, id: string): Promise<BtActionResult>;
+  openBluetoothSettings(): void;
   /** One validated JSON plan of 3D edit operations from the local model. */
   planModelEdit(request: PlanRequest): Promise<PlanResult>;
 }

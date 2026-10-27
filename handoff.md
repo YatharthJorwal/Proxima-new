@@ -133,6 +133,36 @@ process / input / output on the left, devices / activity / map on the right).
     undo/redo (40 steps) now covers drawing, deleting, transforms, booleans,
     imports and model edits. The classic dashboard still uses the old
     `proxy:edit-model-transform` handler.
+- **Round 4 (all on `react-shell`):**
+  - **Bluetooth & devices card** (System page, tall card in the last column,
+    modelled on Windows Settings): search, paired devices with
+    Connect / Disconnect / Remove (Remove asks first), Add device (scan, then
+    Pair), plus "Other devices" (audio endpoints, cameras) from the engine's
+    device list with Bluetooth profiles/services such as "Generic Access
+    Profile" hidden (`ui/src/lib/devices.ts`; the Home card is filtered the
+    same way). Backend: `src/commands/bluetooth.ts`, one Windows PowerShell 5.1
+    script using the WinRT `DeviceInformation` pairing APIs (list, scan, pair,
+    unpair) and `BluetoothApis.dll` `BluetoothSetServiceState` for
+    connect/disconnect (classic devices only; Low Energy devices can be listed
+    and removed). The action and device id travel in env vars, never in the
+    script text; the main process only accepts ids that appeared in the last
+    list/scan; one Windows Bluetooth call at a time; 40-45 s timeouts. IPC:
+    `proxy:bt-list`, `proxy:bt-scan`, `proxy:bt-action`,
+    `proxy:open-bluetooth-settings` (fixed `ms-settings:bluetooth`).
+    **Verified only with mocks**: PowerShell 7 parse, the C# interop compiles
+    and its struct is the 560 bytes Windows needs, every action's JSON shape
+    and error path, plus unit tests. NOT verified against real Bluetooth
+    hardware. If scan finds nothing, or Connect fails on a device, start with
+    `bluetooth.ts` (WinRT `FindAllAsync` selectors, the service GUID list).
+  - **Memory page:** a single Select button turns on checkboxes (Select all,
+    Delete selected); outside Select mode there are none. Per-fact Delete and
+    Edit both ask first (Edit asks at Save and shows before/after). The fact
+    list scrolls inside its card.
+  - **System page:** the two process lists became one card with a
+    Memory / CPU time toggle, so six metric cards plus the tall Bluetooth card
+    fill the grid.
+  - **Studio:** inspector sections have consistent spacing, overlays can no
+    longer be text-selected by accident.
 - **Neural chain** (Home, bottom left): a 3D layered graph, one layer per
   pipeline stage (Listen, Understand, Analyze, Act, Respond, Speak). The
   active layer lights and pulses travel in when the stage changes, driven by

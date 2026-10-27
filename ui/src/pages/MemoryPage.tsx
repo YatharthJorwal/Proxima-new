@@ -9,7 +9,7 @@ import { Panel } from "../components/Panel";
 
 const MAX_INSTRUCTIONS = 2000;
 const MAX_FACT = 300;
-type Confirm = null | { kind: "log" } | { kind: "all" } | { kind: "selected"; ids: string[] };
+type LogConfirm = null | { kind: "log" };
 
 function InstructionsCard() {
   const [saved, setSaved] = useState("");
@@ -51,41 +51,52 @@ function InstructionsCard() {
   );
 }
 
-function FactRow({ fact, selected, onSelect, onSave, onDelete }: {
-  fact: MemoryFact; selected: boolean; onSelect: (on: boolean) => void; onSave: (text: string) => Promise<string | null>; onDelete: () => void;
+type FactConfirm = null
+  | { kind: "all" }
+  | { kind: "selected"; ids: string[] }
+  | { kind: "delete-one"; fact: MemoryFact }
+  | { kind: "edit-one"; fact: MemoryFact; text: string };
+
+function FactRow({ fact, selecting, selected, onToggle, editing, draft, error, onDraft, onEdit, onCancel, onSave, onDelete }: {
+  fact: MemoryFact; selecting: boolean; selected: boolean; onToggle: () => void;
+  editing: boolean; draft: string; error: string; onDraft: (t: string) => void; onEdit: () => void; onCancel: () => void; onSave: () => void; onDelete: () => void;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(fact.text);
-  const [error, setError] = useState("");
-  const commit = async () => {
-    if (draft.trim() === fact.text) { setEditing(false); return; }
-    const err = await onSave(draft);
-    if (err) setError(err); else { setEditing(false); setError(""); }
-  };
+  const body = (
+    <div className="fact-main">
+      {editing ? (
+        <>
+          <textarea className="text-area" rows={2} maxLength={MAX_FACT} value={draft} autoFocus aria-label="Edit fact"
+            onChange={(e) => onDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSave(); } else if (e.key === "Escape") onCancel(); }} />
+          {error && <span className="field-error" role="alert">{error}</span>}
+        </>
+      ) : (
+        <span className="fact-text"><span>{fact.text}</span>{fact.pinned && <span className="chip chip-mine" title="You wrote or edited this, so automatic pruning removes it last">yours</span>}</span>
+      )}
+    </div>
+  );
+  if (selecting) {
+    return (
+      <li className={`fact selectable${selected ? " selected" : ""}`}>
+        <label className="fact-select">
+          <input type="checkbox" checked={selected} onChange={onToggle} aria-label={`Select: ${fact.text}`} />
+          {body}
+        </label>
+      </li>
+    );
+  }
   return (
-    <li className={`fact${selected ? " selected" : ""}`}>
-      <input type="checkbox" checked={selected} onChange={(e) => onSelect(e.target.checked)} aria-label={`Select: ${fact.text}`} />
-      <div className="fact-main">
-        {editing ? (
-          <>
-            <textarea className="text-area" rows={2} maxLength={MAX_FACT} value={draft} autoFocus aria-label="Edit fact"
-              onChange={(e) => { setDraft(e.target.value); setError(""); }}
-              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void commit(); } else if (e.key === "Escape") { setEditing(false); setDraft(fact.text); setError(""); } }} />
-            {error && <span className="field-error" role="alert">{error}</span>}
-          </>
-        ) : (
-          <span className="fact-text">{fact.text}{fact.pinned && <span className="chip chip-mine" title="You wrote or edited this, so automatic pruning removes it last">yours</span>}</span>
-        )}
-      </div>
+    <li className={`fact${editing ? " editing" : ""}`}>
+      {body}
       <div className="fact-actions">
         {editing ? (
           <>
-            <button type="button" className="btn btn-small btn-primary" onClick={() => void commit()}>Save</button>
-            <button type="button" className="btn btn-small" onClick={() => { setEditing(false); setDraft(fact.text); setError(""); }}>Cancel</button>
+            <button type="button" className="btn btn-small btn-primary" onClick={onSave}>Save</button>
+            <button type="button" className="btn btn-small" onClick={onCancel}>Cancel</button>
           </>
         ) : (
           <>
-            <button type="button" className="btn btn-small" onClick={() => { setDraft(fact.text); setEditing(true); }}>Edit</button>
+            <button type="button" className="btn btn-small" onClick={onEdit}>Edit</button>
             <button type="button" className="icon-btn danger" aria-label={`Delete: ${fact.text}`} title="Delete" onClick={onDelete}><Icon name="trash" size={16} /></button>
           </>
         )}
@@ -94,17 +105,23 @@ function FactRow({ fact, selected, onSelect, onSave, onDelete }: {
   );
 }
 
-function MemoryCard({ onConfirm, version }: { onConfirm: (c: Confirm) => void; version: number }) {
+function MemoryCard() {
   const [facts, setFacts] = useState<MemoryFact[] | null>(null);
   const [message, setMessage] = useState("Loading saved facts…");
+  const [selecting, setSelecting] = useState(false);
   const [sel, setSel] = useState<Set<string>>(new Set());
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [editError, setEditError] = useState("");
   const [adding, setAdding] = useState("");
   const [addError, setAddError] = useState("");
+  const [confirm, setConfirm] = useState<FactConfirm>(null);
 
+  const EMPTY = "Nothing saved yet. Add a fact below, or Proxima will save durable things you tell it.";
   const apply = useCallback((r: MemoryEdit | undefined): string | null => {
     if (!r) return "Memory is unavailable.";
     if (!r.ok) return r.error;
-    setFacts(r.facts); setMessage(r.facts.length ? "" : "Nothing saved yet. Add a fact below, or Proxima will save durable things you tell it.");
+    setFacts(r.facts); setMessage(r.facts.length ? "" : EMPTY);
     setSel((s) => new Set([...s].filter((id) => r.facts.some((f) => f.id === id))));
     return null;
   }, []);
@@ -113,36 +130,74 @@ function MemoryCard({ onConfirm, version }: { onConfirm: (c: Confirm) => void; v
     try {
       const r = await window.proxy?.getMemory();
       if (!Array.isArray(r)) { setFacts(null); setMessage(r?.error || "Saved memory is unavailable."); return; }
-      setFacts(r); setMessage(r.length ? "" : "Nothing saved yet. Add a fact below, or Proxima will save durable things you tell it.");
+      setFacts(r); setMessage(r.length ? "" : EMPTY);
     } catch { setFacts(null); setMessage("Saved memory is unavailable."); }
   }, []);
-  useEffect(() => { void refresh(); }, [refresh, version]);
+  useEffect(() => { void refresh(); }, [refresh]);
 
   const ids = useMemo(() => [...sel], [sel]);
   const all = !!facts?.length && sel.size === facts.length;
+  const leaveSelecting = () => { setSelecting(false); setSel(new Set()); };
   const add = async () => {
     const err = apply(await window.proxy?.addMemory(adding));
     if (err) setAddError(err); else { setAdding(""); setAddError(""); }
   };
+  const startEdit = (f: MemoryFact) => { setEditingId(f.id); setDraft(f.text); setEditError(""); };
+  const stopEdit = () => { setEditingId(null); setEditError(""); };
+  const requestSave = (f: MemoryFact) => {
+    const text = draft.trim();
+    if (text === f.text) { stopEdit(); return; }
+    if (!text) { setEditError("A fact can't be empty."); return; }
+    setConfirm({ kind: "edit-one", fact: f, text });
+  };
+
+  const resolve = async (ok: boolean) => {
+    const c = confirm;
+    setConfirm(null);
+    if (!ok || !c) return;
+    if (c.kind === "all") { await window.proxy?.clearMemory(); leaveSelecting(); stopEdit(); await refresh(); }
+    else if (c.kind === "selected") { apply(await window.proxy?.deleteMemory(c.ids)); leaveSelecting(); }
+    else if (c.kind === "delete-one") { apply(await window.proxy?.deleteMemory([c.fact.id])); }
+    else {
+      const err = apply(await window.proxy?.updateMemory(c.fact.id, c.text));
+      if (err) setEditError(err); else stopEdit();
+    }
+  };
+  const msg = !confirm ? "" : confirm.kind === "all" ? "Forget every saved fact? This cannot be undone."
+    : confirm.kind === "selected" ? `Delete ${confirm.ids.length} selected fact${confirm.ids.length === 1 ? "" : "s"}? This cannot be undone.`
+    : confirm.kind === "delete-one" ? `Delete this fact?\n\n“${confirm.fact.text}”`
+    : `Change this fact?\n\nFrom: “${confirm.fact.text}”\nTo: “${confirm.text}”`;
+  const label = !confirm ? "" : confirm.kind === "all" ? "Forget all" : confirm.kind === "edit-one" ? "Save change" : "Delete";
 
   return (
     <Panel title="Memory" className="memory-panel" status={facts ? <span className="chip">{facts.length} saved</span> : undefined}
       actions={<button type="button" className="btn btn-small" onClick={() => void refresh()}><Icon name="refresh" size={14} />Refresh</button>}>
-      <p className="note">Facts kept on this computer that Proxima can recall later. Edit or delete any of them. Ones you write or edit are marked “yours” and are the last to be pruned.</p>
-      <div className="row between memory-toolbar">
-        <label className="check"><input type="checkbox" checked={all} disabled={!facts?.length} onChange={(e) => setSel(e.target.checked && facts ? new Set(facts.map((f) => f.id)) : new Set())} />Select all</label>
+      <p className="note">Facts kept on this computer that Proxima can recall later. Ones you write or edit are marked “yours” and are the last to be pruned.</p>
+      <div className="memory-toolbar">
         <div className="row">
-          <button type="button" className="btn btn-small btn-danger" disabled={!ids.length} onClick={() => onConfirm({ kind: "selected", ids })}><Icon name="trash" size={14} />Delete selected{ids.length ? ` (${ids.length})` : ""}</button>
-          <button type="button" className="btn btn-small btn-danger" disabled={!facts?.length} onClick={() => onConfirm({ kind: "all" })}>Forget all</button>
+          {selecting ? (
+            <>
+              <button type="button" className="btn btn-small" onClick={leaveSelecting}>Done</button>
+              <label className="check"><input type="checkbox" checked={all} disabled={!facts?.length} onChange={(e) => setSel(e.target.checked && facts ? new Set(facts.map((f) => f.id)) : new Set())} />Select all</label>
+              <span className="note num">{ids.length} selected</span>
+            </>
+          ) : (
+            <button type="button" className="btn btn-small" disabled={!facts?.length} onClick={() => { stopEdit(); setSelecting(true); }}>Select</button>
+          )}
+        </div>
+        <div className="row">
+          {selecting && <button type="button" className="btn btn-small btn-danger" disabled={!ids.length} onClick={() => setConfirm({ kind: "selected", ids })}><Icon name="trash" size={14} />Delete selected{ids.length ? ` (${ids.length})` : ""}</button>}
+          <button type="button" className="btn btn-small btn-danger" disabled={!facts?.length} onClick={() => setConfirm({ kind: "all" })}>Forget all</button>
         </div>
       </div>
       {message && <p className="empty" role="status">{message}</p>}
       <ul className="facts">
         {facts?.map((f) => (
-          <FactRow key={f.id} fact={f} selected={sel.has(f.id)}
-            onSelect={(on) => setSel((s) => { const n = new Set(s); if (on) n.add(f.id); else n.delete(f.id); return n; })}
-            onSave={async (text) => apply(await window.proxy?.updateMemory(f.id, text))}
-            onDelete={() => void window.proxy?.deleteMemory([f.id]).then(apply)} />
+          <FactRow key={f.id} fact={f} selecting={selecting} selected={sel.has(f.id)}
+            onToggle={() => setSel((s) => { const n = new Set(s); if (n.has(f.id)) n.delete(f.id); else n.add(f.id); return n; })}
+            editing={editingId === f.id} draft={draft} error={editError}
+            onDraft={(t) => { setDraft(t); setEditError(""); }} onEdit={() => startEdit(f)} onCancel={stopEdit} onSave={() => requestSave(f)}
+            onDelete={() => setConfirm({ kind: "delete-one", fact: f })} />
         ))}
       </ul>
       <div className="add-fact">
@@ -151,36 +206,23 @@ function MemoryCard({ onConfirm, version }: { onConfirm: (c: Confirm) => void; v
         <button type="button" className="btn btn-small btn-primary" disabled={!adding.trim()} onClick={() => void add()}>Add</button>
       </div>
       {addError && <span className="field-error" role="alert">{addError}</span>}
+      {confirm && <ConfirmDialog message={msg} confirmLabel={label} onResult={(ok) => void resolve(ok)} />}
     </Panel>
   );
 }
 
 export function MemoryPage({ state }: { state: EngineState }) {
-  const [confirm, setConfirm] = useState<Confirm>(null);
-  const [version, setVersion] = useState(0);
-
-  const resolve = async (ok: boolean) => {
-    const c = confirm;
-    setConfirm(null);
-    if (!ok || !c) return;
-    if (c.kind === "log") clearLog();
-    else if (c.kind === "all") { await window.proxy?.clearMemory(); setVersion((v) => v + 1); }
-    else { await window.proxy?.deleteMemory(c.ids); setVersion((v) => v + 1); }
-  };
-  const msg = !confirm ? "" : confirm.kind === "log" ? "Clear the session log, including its saved copy? This cannot be undone."
-    : confirm.kind === "all" ? "Forget every saved fact? This cannot be undone."
-    : `Delete ${confirm.ids.length} selected fact${confirm.ids.length === 1 ? "" : "s"}? This cannot be undone.`;
-
+  const [confirm, setConfirm] = useState<LogConfirm>(null);
   return (
     <div className="memory-layout">
       <div className="stack">
         <InstructionsCard />
-        <MemoryCard onConfirm={setConfirm} version={version} />
+        <MemoryCard />
       </div>
       <Panel title="Session log" className="log-panel" actions={<button type="button" className="btn btn-small" onClick={() => setConfirm({ kind: "log" })} disabled={!state.log.length}><Icon name="trash" size={14} />Clear</button>}>
         <LogView lines={state.log} />
       </Panel>
-      {confirm && <ConfirmDialog message={msg} confirmLabel={confirm.kind === "log" ? "Clear log" : confirm.kind === "all" ? "Forget all" : "Delete"} onResult={(ok) => void resolve(ok)} />}
+      {confirm && <ConfirmDialog message="Clear the session log, including its saved copy? This cannot be undone." confirmLabel="Clear log" onResult={(ok) => { setConfirm(null); if (ok) clearLog(); }} />}
     </div>
   );
 }

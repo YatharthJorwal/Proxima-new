@@ -128,6 +128,10 @@ contextBridge.exposeInMainWorld("proxy", {
   getInstructions: () => ipcRenderer.invoke("proxy:get-instructions"),
   setInstructions: (text: string) => ipcRenderer.invoke("proxy:set-instructions", text),
   openExternal: (url: string) => { if (typeof url === "string" && /^https:\/\//i.test(url)) ipcRenderer.send("proxy:open-external", url); },
+  btList: () => ipcRenderer.invoke("proxy:bt-list"),
+  btScan: () => ipcRenderer.invoke("proxy:bt-scan"),
+  btAction: (action: string, id: string) => ipcRenderer.invoke("proxy:bt-action", action, id),
+  openBluetoothSettings: () => ipcRenderer.send("proxy:open-bluetooth-settings"),
   planModelEdit: (request: unknown) => ipcRenderer.invoke("proxy:plan-model-edit", request),
   analyzeModelPreview: (imageBase64: string) => ipcRenderer.invoke("proxy:analyze-model", imageBase64),
   editModelTransform: (request: { prompt: string; kind: string; current: { position: { x: number; y: number; z: number }; rotation: { x: number; y: number; z: number }; scale: number } }) =>

@@ -69,6 +69,7 @@ import { chat } from "../core/llm";
 import { addManualFact, clearStoredFacts, deleteStoredFacts, getStoredFacts, updateStoredFact } from "../core/memory";
 import { getInstructions, setInstructions } from "../core/instructions";
 import { planModelEdit } from "../core/modelOps";
+import { actOnDevice, listPairedDevices, scanForDevices } from "../commands/bluetooth";
 
 const HOTKEY = process.env.PROXY_HOTKEY || "F9";
 const MAX_TYPED_INPUT_LENGTH = 1000;
@@ -254,6 +255,11 @@ function wireRendererCommands() {
   ipcMain.on("proxy:open-external", (_event, url) => {
     if (typeof url === "string" && url.length < 2000 && /^https:\/\//i.test(url)) void shell.openExternal(url);
   });
+  // Bluetooth & devices card. Device ids are only accepted if Windows returned them in the last list/scan.
+  ipcMain.handle("proxy:bt-list", () => listPairedDevices());
+  ipcMain.handle("proxy:bt-scan", () => scanForDevices());
+  ipcMain.handle("proxy:bt-action", (_event, action, id) => actOnDevice(action, id));
+  ipcMain.on("proxy:open-bluetooth-settings", () => { void shell.openExternal("ms-settings:bluetooth"); }); // fixed string, no input
   // 3D Studio: one JSON plan from the local model, validated in core/modelOps.ts.
   ipcMain.handle("proxy:plan-model-edit", async (_event, request) => {
     if (!request || typeof request !== "object") return { ok: false, error: "Invalid request." };

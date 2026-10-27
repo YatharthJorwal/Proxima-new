@@ -1,4 +1,5 @@
 import type { EngineState } from "../bridge/engineState";
+import { otherDevices } from "../lib/devices";
 import { Icon, IconName } from "./icons";
 import { Panel } from "./Panel";
 
@@ -11,7 +12,7 @@ function iconFor(kind: string): IconName {
 }
 
 export function DevicesCard({ state, limit, onViewAll }: { state: EngineState; limit?: number; onViewAll?: () => void }) {
-  const d = state.devices;
+  const d = state.devices === undefined || state.devices === null ? state.devices : otherDevices(state.devices, null);
   let body;
   if (d === undefined) body = <p className="empty">Waiting for the Windows device inventory…</p>;
   else if (d === null) body = <p className="empty">Windows device inventory unavailable.</p>;

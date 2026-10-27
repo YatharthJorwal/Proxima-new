@@ -1,8 +1,8 @@
 import type { EngineState } from "../bridge/engineState";
 import { useNow } from "../bridge/store";
 import { formatDuration } from "../lib/format";
-import { DevicesCard } from "../components/DevicesCard";
-import { CpuCard, DiskCard, MemoryCard, NetworkCard, ProcessCard } from "../components/MonitorCard";
+import { BluetoothCard } from "../components/BluetoothCard";
+import { CpuCard, DiskCard, MemoryCard, NetworkCard, ProcessesCard } from "../components/MonitorCard";
 import { Panel } from "../components/Panel";
 import { engineLabel } from "../components/Sidebar";
 
@@ -24,7 +24,7 @@ function StatusCard({ state }: { state: EngineState }) {
   );
 }
 
-/** Eight equal cards: one metric each, so the page fills evenly at any width. */
+/** Six equal metric cards plus a tall Bluetooth & devices card, so the page fills evenly at any width. */
 export function SystemPage({ state }: { state: EngineState }) {
   return (
     <div className="metric-grid">
@@ -32,10 +32,9 @@ export function SystemPage({ state }: { state: EngineState }) {
       <MemoryCard state={state} />
       <DiskCard state={state} />
       <NetworkCard state={state} />
-      <ProcessCard state={state} by="memory" />
-      <ProcessCard state={state} by="cpu" />
+      <ProcessesCard state={state} />
       <StatusCard state={state} />
-      <DevicesCard state={state} />
+      <BluetoothCard state={state} />
     </div>
   );
 }

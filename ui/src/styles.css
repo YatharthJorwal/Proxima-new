@@ -439,3 +439,68 @@ code { font: 12px ui-monospace, Consolas, monospace; padding: 1px 5px; border-ra
 .studio-stage.tray-open .studio-keys { display: none; }
 @container (max-width: 1100px) { .tray-pane.grid3 { grid-template-columns: minmax(0, 1fr); } }
 .metric .spark { flex: 1 1 70px; height: auto !important; min-height: 70px; margin-top: 8px; }
+
+/* ---- system page: tall Bluetooth card in the last column ---- */
+.metric-grid .bt-card { grid-row: span 2; }
+@container (min-width: 700px) { .metric-grid .bt-card { grid-column: 1 / -1; } }
+@container (min-width: 1400px) { .metric-grid .bt-card { grid-column: 4; grid-row: 1 / span 2; } }
+.seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 8px; overflow: hidden; }
+.seg button { padding: 4px 12px; border: 0; background: none; color: var(--muted); font-size: 12px; font-weight: 500; }
+.seg button + button { border-left: 1px solid var(--line-strong); }
+.seg button:hover { color: var(--text); }
+.seg button[aria-pressed="true"] { background: rgba(63, 169, 255, 0.28); color: #fff; }
+
+/* ---- bluetooth & devices ---- */
+.bt-card .panel-body { display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+.bt-search { flex: none; }
+.bt-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 6px; display: grid; gap: 16px; align-content: start; }
+.bt-section-head { display: flex; justify-content: space-between; align-items: center; margin: 0 0 6px; }
+.bt-section-head h4 { margin: 0; font: 600 12px var(--font-display); letter-spacing: 0.14em; text-transform: uppercase; color: #9fb6d4; }
+.bt-list { list-style: none; margin: 0 0 10px; padding: 0; display: grid; }
+.bt-row { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 8px 2px; border-bottom: 1px solid rgba(86, 146, 226, 0.09); }
+.bt-actions { display: flex; align-items: center; gap: 6px; }
+.bt-notice { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 0; padding: 9px 12px; border-radius: 10px; font-size: 12.5px; line-height: 1.4; }
+.bt-notice.ok { background: rgba(61, 220, 151, 0.1); color: var(--ok); }
+.bt-notice.bad { background: rgba(255, 92, 108, 0.1); color: #ffb8c0; }
+.bt-notice .link-btn { flex: none; white-space: nowrap; }
+.inline-spinner { display: inline-block; vertical-align: -2px; margin-right: 6px; }
+.bt-scan .row.wrap { gap: 8px; margin-top: 4px; }
+
+/* ---- memory page: calmer rows, select mode, scrolling card ---- */
+.memory-panel .panel-body { display: flex; flex-direction: column; gap: 0; max-height: min(680px, calc(100vh - 150px)); overflow: hidden; }
+.memory-panel .panel-body > * { flex: none; }
+.memory-panel .facts { flex: 1 1 auto; min-height: 120px; overflow-y: auto; margin: 0; padding: 2px 6px 2px 0; gap: 8px; }
+.memory-panel .empty { padding: 8px 0; }
+.memory-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin: 12px 0; }
+.memory-toolbar .row { gap: 10px; flex-wrap: wrap; }
+.fact { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 10px 14px; min-height: 54px; border-radius: 12px; border: 1px solid var(--line); background: rgba(4, 10, 22, 0.45); }
+.fact.editing { align-items: start; border-color: var(--accent); }
+.fact.selectable { display: block; padding: 0; }
+.fact-select { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 14px; align-items: center; padding: 12px 14px; min-height: 54px; cursor: pointer; }
+.fact-main { min-width: 0; }
+.fact-text { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.fact-actions { display: flex; align-items: center; gap: 8px; }
+.chip-mine { margin: 0; }
+.add-fact { display: flex; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(86, 146, 226, 0.12); }
+.memory-panel .field-error { margin-top: 6px; }
+.log-panel .log { max-height: min(680px, calc(100vh - 220px)); }
+
+/* ---- studio: breathing room, and no accidental text selection on overlays ---- */
+.studio { user-select: none; -webkit-user-select: none; }
+.studio input, .studio textarea, .studio select { user-select: text; -webkit-user-select: text; }
+.studio-inspector { padding: 14px 16px 20px; gap: 0; }
+.inspector-head { padding-bottom: 12px; margin-bottom: 4px; border-bottom: 1px solid rgba(86, 146, 226, 0.12); }
+.studio-inspector > .note { margin: 10px 0 6px; line-height: 1.5; }
+.studio-inspector section { padding: 14px 0; }
+.studio-inspector section h3 { margin: 0 0 10px; }
+.studio-inspector .row.wrap { gap: 8px; }
+.studio-inspector .slider-row { margin-top: 12px; gap: 6px; }
+.studio-inspector .slider-row select { margin-top: 2px; }
+.studio-inspector section > .btn { margin-top: 12px; }
+.studio-inspector .result { margin: 10px 0 0; }
+.studio-inspector > .btn.wide { margin: 14px 0 0; }
+.studio-hint { padding: 8px 14px; }
+.studio-corner { gap: 8px; }
+.tray-handle { gap: 8px; padding: 6px 16px; }
+.studio-keys { max-width: calc(50% - 110px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.instructions .note:first-of-type { margin: 0 0 10px; }
