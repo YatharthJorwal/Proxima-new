@@ -85,6 +85,18 @@ describe("acting on a device", () => {
     expect(_testing.known.has("Bluetooth#A")).toBe(false); // gone from the whitelist
   });
 
+  it("explains Windows error codes from the Win32 pairing call", () => {
+    expect(explainStatus("Code1223")).toBe("Pairing was cancelled.");
+    expect(explainStatus("Code1244")).toContain("Windows Settings");
+    expect(explainStatus("Code9999")).toContain("code 9999");
+  });
+
+  it("reports a failed removal with its code instead of pretending it worked", async () => {
+    await seed();
+    expect(await actOnDevice("remove", "Bluetooth#A", answer({ ok: true, status: "Code5" }), "win32")).toMatchObject({ ok: false, error: expect.stringContaining("code 5") });
+    expect(_testing.known.has("Bluetooth#A")).toBe(true); // still in the list
+  });
+
   it("translates pairing outcomes into plain language", async () => {
     await seed();
     expect(await actOnDevice("pair", "Bluetooth#A", answer({ ok: true, status: "Paired" }), "win32")).toMatchObject({ ok: true });

@@ -93,3 +93,15 @@ export function describePlan(kind: ShapeKind, plan: PrimitivePlan, stage: "footp
   if (kind === "cylinder" || kind === "cone") return stage === "height" ? `Ø ${f(x)} × ${f(y)} tall` : `Ø ${f(x)}`;
   return `Ø ${f(x)}`;
 }
+
+/**
+ * Radius, in scene units, for a drag of `pixels` on screen at the anchor's
+ * depth. Used for spheres, where the size should follow how far the mouse
+ * moved, the same in every direction. (Measuring along the ground plane
+ * instead stretches vertical drags by perspective, so the sphere balloons when
+ * the mouse goes up or down the screen.)
+ */
+export function screenRadius(pixels: number, depth: number, fovDegrees: number, viewportHeight: number): number {
+  if (!Number.isFinite(pixels) || !Number.isFinite(depth) || viewportHeight <= 0) return 0;
+  return (Math.max(0, pixels) * 2 * Math.tan((fovDegrees * Math.PI) / 360) * Math.max(0, depth)) / viewportHeight;
+}

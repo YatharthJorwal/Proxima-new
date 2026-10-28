@@ -504,3 +504,7 @@ code { font: 12px ui-monospace, Consolas, monospace; padding: 1px 5px; border-ra
 .tray-handle { gap: 8px; padding: 6px 16px; }
 .studio-keys { max-width: calc(50% - 110px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .instructions .note:first-of-type { margin: 0 0 10px; }
+
+/* memory card: roughly six facts visible; the rest scroll */
+.memory-panel .panel-body { max-height: none; overflow: visible; }
+.memory-panel .facts { flex: 0 1 auto; min-height: 0; max-height: min(372px, 44vh); }

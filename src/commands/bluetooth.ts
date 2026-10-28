@@ -2,8 +2,9 @@
  * Bluetooth device management for the dashboard's "Bluetooth & devices" card:
  * list paired devices, scan for new ones, pair, remove, connect, disconnect.
  *
- * Everything goes through ONE Windows PowerShell script (powershell.exe 5.1,
- * the only PowerShell that can reach the Windows Runtime Bluetooth APIs).
+ * Everything goes through ONE Windows PowerShell script (powershell.exe 5.1).
+ * Classic Bluetooth uses the Win32 API in BluetoothApis.dll; Low Energy
+ * devices are listed (best effort) through the Windows Runtime.
  * What the script is asked to do and which device it acts on travel in
  * environment variables, never inside the script text, so a device name can
  * never become code. The TypeScript side also refuses any device id that was
@@ -40,14 +41,170 @@ $deviceId = $env:PROXIMA_BT_ID
 
 function Emit($obj) { [Console]::Out.WriteLine(($obj | ConvertTo-Json -Compress -Depth 6)) }
 
-function Load-WinRt {
-  Add-Type -AssemblyName System.Runtime.WindowsRuntime
-  $null = [Windows.Devices.Enumeration.DeviceInformation,Windows.Devices.Enumeration,ContentType=WindowsRuntime]
-  $null = [Windows.Devices.Enumeration.DeviceInformationCollection,Windows.Devices.Enumeration,ContentType=WindowsRuntime]
-  $null = [Windows.Devices.Enumeration.DevicePairingResult,Windows.Devices.Enumeration,ContentType=WindowsRuntime]
-  $null = [Windows.Devices.Enumeration.DeviceUnpairingResult,Windows.Devices.Enumeration,ContentType=WindowsRuntime]
-  $null = [Windows.Devices.Bluetooth.BluetoothDevice,Windows.Devices.Bluetooth,ContentType=WindowsRuntime]
-  $null = [Windows.Devices.Bluetooth.BluetoothLEDevice,Windows.Devices.Bluetooth,ContentType=WindowsRuntime]
+# Classic Bluetooth (headphones, speakers, phones) goes through the Win32 Bluetooth API in
+# BluetoothApis.dll: device list, nearby-device inquiry, pairing, removal and service state.
+# It has no overload surprises and has been stable since Windows Vista.
+function Add-BtInterop {
+  if ('ProximaBt' -as [type]) { return }
+  Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+
+public class BtDeviceRow {
+  public string Name;
+  public string Address;
+  public bool Connected;
+  public bool Paired;
+}
+
+public static class ProximaBt {
+  [StructLayout(LayoutKind.Sequential)]
+  public struct SYSTEMTIME { public ushort a, b, c, d, e, f, g, h; }
+
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  public struct BLUETOOTH_DEVICE_INFO {
+    public uint dwSize; public ulong Address; public uint ulClassofDevice;
+    [MarshalAs(UnmanagedType.Bool)] public bool fConnected;
+    [MarshalAs(UnmanagedType.Bool)] public bool fRemembered;
+    [MarshalAs(UnmanagedType.Bool)] public bool fAuthenticated;
+    public SYSTEMTIME stLastSeen; public SYSTEMTIME stLastUsed;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 248)] public string szName;
+  }
+
+  [StructLayout(LayoutKind.Sequential)]
+  public struct BLUETOOTH_DEVICE_SEARCH_PARAMS {
+    public uint dwSize;
+    [MarshalAs(UnmanagedType.Bool)] public bool fReturnAuthenticated;
+    [MarshalAs(UnmanagedType.Bool)] public bool fReturnRemembered;
+    [MarshalAs(UnmanagedType.Bool)] public bool fReturnUnknown;
+    [MarshalAs(UnmanagedType.Bool)] public bool fReturnConnected;
+    [MarshalAs(UnmanagedType.Bool)] public bool fIssueInquiry;
+    public byte cTimeoutMultiplier;
+    public IntPtr hRadio;
+  }
+
+  [DllImport("BluetoothApis.dll", SetLastError = true)]
+  static extern IntPtr BluetoothFindFirstDevice(ref BLUETOOTH_DEVICE_SEARCH_PARAMS p, ref BLUETOOTH_DEVICE_INFO info);
+  [DllImport("BluetoothApis.dll", SetLastError = true)]
+  [return: MarshalAs(UnmanagedType.Bool)]
+  static extern bool BluetoothFindNextDevice(IntPtr h, ref BLUETOOTH_DEVICE_INFO info);
+  [DllImport("BluetoothApis.dll", SetLastError = true)]
+  [return: MarshalAs(UnmanagedType.Bool)]
+  static extern bool BluetoothFindDeviceClose(IntPtr h);
+  [DllImport("BluetoothApis.dll", SetLastError = true)]
+  static extern uint BluetoothGetDeviceInfo(IntPtr hRadio, ref BLUETOOTH_DEVICE_INFO info);
+  [DllImport("BluetoothApis.dll", SetLastError = true)]
+  static extern uint BluetoothSetServiceState(IntPtr hRadio, ref BLUETOOTH_DEVICE_INFO info, ref Guid service, uint flags);
+  [DllImport("BluetoothApis.dll", SetLastError = true)]
+  static extern uint BluetoothRemoveDevice(ref ulong address);
+  [DllImport("BluetoothApis.dll", SetLastError = true)]
+  static extern uint BluetoothAuthenticateDeviceEx(IntPtr hwndParent, IntPtr hRadio, ref BLUETOOTH_DEVICE_INFO info, IntPtr oobData, int requirement);
+
+  static readonly string[] Services = {
+    "0000110b-0000-1000-8000-00805f9b34fb", "0000110a-0000-1000-8000-00805f9b34fb",
+    "0000110e-0000-1000-8000-00805f9b34fb", "0000110c-0000-1000-8000-00805f9b34fb",
+    "0000111e-0000-1000-8000-00805f9b34fb", "00001108-0000-1000-8000-00805f9b34fb",
+    "00001124-0000-1000-8000-00805f9b34fb"
+  };
+
+  static BLUETOOTH_DEVICE_INFO NewInfo() {
+    BLUETOOTH_DEVICE_INFO info = new BLUETOOTH_DEVICE_INFO();
+    info.dwSize = (uint)Marshal.SizeOf(typeof(BLUETOOTH_DEVICE_INFO));
+    return info;
+  }
+
+  // known = devices this PC has paired or remembered; otherwise, with inquiry, only newly discovered ones.
+  // timeoutMultiplier is in units of 1.28 seconds (6 is about 8 seconds).
+  public static BtDeviceRow[] Find(bool known, bool inquiry, int timeoutMultiplier) {
+    BLUETOOTH_DEVICE_SEARCH_PARAMS p = new BLUETOOTH_DEVICE_SEARCH_PARAMS();
+    p.dwSize = (uint)Marshal.SizeOf(typeof(BLUETOOTH_DEVICE_SEARCH_PARAMS));
+    p.fReturnAuthenticated = known; p.fReturnRemembered = known; p.fReturnConnected = known;
+    p.fReturnUnknown = inquiry; p.fIssueInquiry = inquiry;
+    p.cTimeoutMultiplier = (byte)timeoutMultiplier;
+    p.hRadio = IntPtr.Zero;
+    BLUETOOTH_DEVICE_INFO info = NewInfo();
+    List<BtDeviceRow> rows = new List<BtDeviceRow>();
+    IntPtr h = BluetoothFindFirstDevice(ref p, ref info);
+    if (h == IntPtr.Zero) {
+      int err = Marshal.GetLastWin32Error();
+      if (err == 259) { return rows.ToArray(); }
+      throw new Exception("Windows could not search for Bluetooth devices (code " + err + "). Is Bluetooth turned on?");
+    }
+    try {
+      do {
+        BtDeviceRow row = new BtDeviceRow();
+        row.Name = info.szName;
+        row.Address = info.Address.ToString("X12");
+        row.Connected = info.fConnected;
+        row.Paired = info.fAuthenticated || info.fRemembered;
+        rows.Add(row);
+        info = NewInfo();
+      } while (BluetoothFindNextDevice(h, ref info));
+    } finally {
+      BluetoothFindDeviceClose(h);
+    }
+    return rows.ToArray();
+  }
+
+  // How many of the audio / hands-free / input services accepted the change, or -1 if Windows does not know the device.
+  public static int SetServices(ulong address, bool enable) {
+    BLUETOOTH_DEVICE_INFO info = NewInfo();
+    info.Address = address;
+    if (BluetoothGetDeviceInfo(IntPtr.Zero, ref info) != 0) { return -1; }
+    int ok = 0;
+    foreach (string s in Services) {
+      Guid g = new Guid(s);
+      if (BluetoothSetServiceState(IntPtr.Zero, ref info, ref g, enable ? 1u : 0u) == 0) { ok++; }
+    }
+    return ok;
+  }
+
+  // 0 = paired. Otherwise a Windows error code (1223 = cancelled, 1168 = device not found, ...).
+  public static int Pair(ulong address) {
+    BLUETOOTH_DEVICE_INFO info = NewInfo();
+    info.Address = address;
+    uint rc = BluetoothGetDeviceInfo(IntPtr.Zero, ref info);
+    if (rc != 0) { return (int)rc; }
+    return (int)BluetoothAuthenticateDeviceEx(IntPtr.Zero, IntPtr.Zero, ref info, IntPtr.Zero, 2);
+  }
+
+  public static int Remove(ulong address) {
+    ulong a = address;
+    return (int)BluetoothRemoveDevice(ref a);
+  }
+}
+'@
+}
+
+function ConvertTo-BtAddress([string]$id) {
+  if ($id -notmatch '^bt:([0-9A-F]{12})$') { throw 'This action works on classic Bluetooth devices. Use Windows Settings for Low Energy devices.' }
+  [Convert]::ToUInt64($Matches[1], 16)
+}
+
+# Low Energy devices (keyboards, mice, trackers) are not visible to the Win32 API. Listing them uses the
+# oldest, simplest Windows Runtime overload and is strictly best effort: if anything fails, they are left out.
+function Get-LeDevices {
+  try {
+    Add-Type -AssemblyName System.Runtime.WindowsRuntime
+    $null = [Windows.Devices.Enumeration.DeviceInformation,Windows.Devices.Enumeration,ContentType=WindowsRuntime]
+    $null = [Windows.Devices.Enumeration.DeviceInformationCollection,Windows.Devices.Enumeration,ContentType=WindowsRuntime]
+    $null = [Windows.Devices.Bluetooth.BluetoothLEDevice,Windows.Devices.Bluetooth,ContentType=WindowsRuntime]
+    $null = [Windows.Devices.Bluetooth.BluetoothConnectionStatus,Windows.Devices.Bluetooth,ContentType=WindowsRuntime]
+    $type = [Windows.Devices.Enumeration.DeviceInformationCollection]
+    $paired = Await ([Windows.Devices.Enumeration.DeviceInformation]::FindAllAsync([Windows.Devices.Bluetooth.BluetoothLEDevice]::GetDeviceSelectorFromPairingState($true))) $type
+    $connectedIds = @{}
+    try {
+      $live = Await ([Windows.Devices.Enumeration.DeviceInformation]::FindAllAsync([Windows.Devices.Bluetooth.BluetoothLEDevice]::GetDeviceSelectorFromConnectionStatus([Windows.Devices.Bluetooth.BluetoothConnectionStatus]::Connected))) $type
+      foreach ($d in $live) { $connectedIds[$d.Id] = $true }
+    } catch { }
+    $out = @()
+    foreach ($d in $paired) {
+      if ([string]::IsNullOrWhiteSpace($d.Name)) { continue }
+      $out += [PSCustomObject]@{ id = 'le:' + $d.Id; name = $d.Name; paired = $true; connected = $connectedIds.ContainsKey($d.Id); kind = 'le' }
+    }
+    $out
+  } catch { @() }
 }
 
 # Waits for a Windows Runtime async operation (IAsyncOperation<T>) from a script.
@@ -59,91 +216,54 @@ function Await($op, [Type]$type, [int]$ms = 30000) {
   $task.Result
 }
 
-function Get-Props { [string[]]@('System.Devices.Aep.IsConnected', 'System.Devices.Aep.IsPaired') }
-function Get-Kind { [Windows.Devices.Enumeration.DeviceInformationKind]::AssociationEndpoint }
-
-function Get-Devices([bool]$paired) {
-  $found = @()
-  $selectors = @(
-    @('classic', [Windows.Devices.Bluetooth.BluetoothDevice]::GetDeviceSelectorFromPairingState($paired)),
-    @('le', [Windows.Devices.Bluetooth.BluetoothLEDevice]::GetDeviceSelectorFromPairingState($paired))
-  )
-  foreach ($s in $selectors) {
-    $col = Await ([Windows.Devices.Enumeration.DeviceInformation]::FindAllAsync($s[1], (Get-Props), (Get-Kind))) ([Windows.Devices.Enumeration.DeviceInformationCollection])
-    foreach ($d in $col) {
-      if ([string]::IsNullOrWhiteSpace($d.Name)) { continue }
-      $found += [PSCustomObject]@{ id = $d.Id; name = $d.Name; paired = [bool]$d.Pairing.IsPaired; connected = [bool]$d.Properties['System.Devices.Aep.IsConnected']; kind = $s[0] }
-    }
-  }
-  $found
+function Row-Of($d, [string]$fallback) {
+  $name = if ([string]::IsNullOrWhiteSpace($d.Name)) { $fallback } else { $d.Name }
+  [PSCustomObject]@{ id = 'bt:' + $d.Address; name = $name; paired = [bool]$d.Paired; connected = [bool]$d.Connected; kind = 'classic' }
 }
 
-function Get-DeviceInfo([string]$id) {
-  Await ([Windows.Devices.Enumeration.DeviceInformation]::CreateFromIdAsync($id, (Get-Props), (Get-Kind))) ([Windows.Devices.Enumeration.DeviceInformation])
+function Get-PairedDevices {
+  Add-BtInterop
+  $out = @()
+  foreach ($d in [ProximaBt]::Find($true, $false, 0)) { $out += Row-Of $d ('Bluetooth device ' + $d.Address.Substring(8)) }
+  @($out) + @(Get-LeDevices)
+}
+
+function Scan-Devices {
+  Add-BtInterop
+  $out = @()
+  foreach ($d in [ProximaBt]::Find($false, $true, 6)) { $out += Row-Of $d ('Unnamed device ' + $d.Address.Substring(8)) }
+  @($out)
 }
 
 function Invoke-Pair([string]$id) {
-  $di = Get-DeviceInfo $id
-  if ($di.Pairing.IsPaired) { return 'AlreadyPaired' }
-  $res = Await ($di.Pairing.PairAsync()) ([Windows.Devices.Enumeration.DevicePairingResult]) 40000
-  $res.Status.ToString()
+  Add-BtInterop
+  $address = ConvertTo-BtAddress $id
+  # Refresh Windows' view of what is nearby so a device found a moment ago is still known.
+  $null = [ProximaBt]::Find($false, $true, 3)
+  $rc = [ProximaBt]::Pair($address)
+  if ($rc -ne 0) { return "Code$rc" }
+  $null = [ProximaBt]::SetServices($address, $true)
+  'Paired'
 }
 
 function Invoke-Unpair([string]$id) {
-  $di = Get-DeviceInfo $id
-  $res = Await ($di.Pairing.UnpairAsync()) ([Windows.Devices.Enumeration.DeviceUnpairingResult]) 30000
-  $res.Status.ToString()
-}
-
-function Add-BtInterop {
-  if ('ProximaBt' -as [type]) { return }
-  Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-public static class ProximaBt {
-  [StructLayout(LayoutKind.Sequential)]
-  public struct SYSTEMTIME { public ushort a, b, c, d, e, f, g, h; }
-  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-  public struct BLUETOOTH_DEVICE_INFO {
-    public uint dwSize; public ulong Address; public uint ulClassofDevice;
-    [MarshalAs(UnmanagedType.Bool)] public bool fConnected;
-    [MarshalAs(UnmanagedType.Bool)] public bool fRemembered;
-    [MarshalAs(UnmanagedType.Bool)] public bool fAuthenticated;
-    public SYSTEMTIME stLastSeen; public SYSTEMTIME stLastUsed;
-    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 248)] public string szName;
+  if ($id.StartsWith('le:')) {
+    Add-Type -AssemblyName System.Runtime.WindowsRuntime
+    $null = [Windows.Devices.Enumeration.DeviceInformation,Windows.Devices.Enumeration,ContentType=WindowsRuntime]
+    $null = [Windows.Devices.Enumeration.DeviceUnpairingResult,Windows.Devices.Enumeration,ContentType=WindowsRuntime]
+    $di = Await ([Windows.Devices.Enumeration.DeviceInformation]::CreateFromIdAsync($id.Substring(3))) ([Windows.Devices.Enumeration.DeviceInformation])
+    $res = Await ($di.Pairing.UnpairAsync()) ([Windows.Devices.Enumeration.DeviceUnpairingResult]) 30000
+    return $res.Status.ToString()
   }
-  [DllImport("BluetoothApis.dll", SetLastError = true)]
-  static extern uint BluetoothGetDeviceInfo(IntPtr hRadio, ref BLUETOOTH_DEVICE_INFO info);
-  [DllImport("BluetoothApis.dll", SetLastError = true)]
-  static extern uint BluetoothSetServiceState(IntPtr hRadio, ref BLUETOOTH_DEVICE_INFO info, ref Guid service, uint flags);
-  static readonly string[] Services = {
-    "0000110b-0000-1000-8000-00805f9b34fb", "0000110a-0000-1000-8000-00805f9b34fb",
-    "0000110e-0000-1000-8000-00805f9b34fb", "0000110c-0000-1000-8000-00805f9b34fb",
-    "0000111e-0000-1000-8000-00805f9b34fb", "00001108-0000-1000-8000-00805f9b34fb",
-    "00001124-0000-1000-8000-00805f9b34fb"
-  };
-  // Returns how many of the audio / hands-free / input services accepted the change, or -1 if Windows does not know the device.
-  public static int SetServices(ulong address, bool enable) {
-    BLUETOOTH_DEVICE_INFO info = new BLUETOOTH_DEVICE_INFO();
-    info.dwSize = (uint)Marshal.SizeOf(typeof(BLUETOOTH_DEVICE_INFO));
-    info.Address = address;
-    if (BluetoothGetDeviceInfo(IntPtr.Zero, ref info) != 0) return -1;
-    int ok = 0;
-    foreach (string s in Services) {
-      Guid g = new Guid(s);
-      if (BluetoothSetServiceState(IntPtr.Zero, ref info, ref g, enable ? 1u : 0u) == 0) ok++;
-    }
-    return ok;
-  }
-}
-'@
+  Add-BtInterop
+  $rc = [ProximaBt]::Remove((ConvertTo-BtAddress $id))
+  if ($rc -ne 0) { return "Code$rc" }
+  'Unpaired'
 }
 
 function Set-Connection([string]$id, [bool]$connect) {
-  $bt = Await ([Windows.Devices.Bluetooth.BluetoothDevice]::FromIdAsync($id)) ([Windows.Devices.Bluetooth.BluetoothDevice])
-  if ($null -eq $bt) { throw 'Windows could not open this device.' }
-  $address = [uint64]$bt.BluetoothAddress
   Add-BtInterop
+  $address = ConvertTo-BtAddress $id
   if ($connect) {
     $null = [ProximaBt]::SetServices($address, $false)
     Start-Sleep -Milliseconds 500
@@ -153,22 +273,12 @@ function Set-Connection([string]$id, [bool]$connect) {
   if ($n -eq 0) { throw 'The device did not accept the request. It may be switched off or out of range.' }
   "$n"
 }
-
-function Scan-Devices {
-  $seen = @{}
-  for ($i = 0; $i -lt 3; $i++) {
-    foreach ($d in (Get-Devices $false)) { if (-not $seen.ContainsKey($d.id)) { $seen[$d.id] = $d } }
-    if ($i -lt 2) { Start-Sleep -Seconds 3 }
-  }
-  @($seen.Values)
-}
 `.trim();
 
 export const DISPATCH = String.raw`
 try {
-  Load-WinRt
   switch ($action) {
-    'list' { Emit @{ ok = $true; devices = @(Get-Devices $true) } }
+    'list' { Emit @{ ok = $true; devices = @(Get-PairedDevices) } }
     'scan' { Emit @{ ok = $true; devices = @(Scan-Devices) } }
     'pair' { Emit @{ ok = $true; status = (Invoke-Pair $deviceId) } }
     'remove' { Emit @{ ok = $true; status = (Invoke-Unpair $deviceId) } }
@@ -251,7 +361,21 @@ const PAIR_MESSAGES: Record<string, string> = {
   ProtectionLevelCouldNotBeMet: "Windows couldn't reach the required security level with this device.",
   AccessDenied: "Windows blocked the request.",
 };
-export const explainStatus = (s: unknown): string => (typeof s === "string" ? PAIR_MESSAGES[s] ?? `Windows answered: ${s}.` : "Done.");
+const CODE_MESSAGES: Record<number, string> = {
+  1223: "Pairing was cancelled.",
+  1168: "Windows hasn't seen this device lately. Scan again with the device in pairing mode.",
+  1167: "The device isn't reachable. Make sure it is on, in pairing mode and close to the PC.",
+  1244: "This device needs a PIN or confirmation that only Windows Settings can show. Use “Open Windows Bluetooth settings”.",
+  87: "Windows rejected the request for this device.",
+  5: "Windows blocked the request. Try again, or use Windows Settings.",
+};
+
+export const explainStatus = (s: unknown): string => {
+  if (typeof s !== "string") return "Done.";
+  const code = /^Code(\d+)$/.exec(s);
+  if (code) return CODE_MESSAGES[Number(code[1])] ?? `Windows could not do that (code ${code[1]}). Try Windows Settings.`;
+  return PAIR_MESSAGES[s] ?? `Windows answered: ${s}.`;
+};
 const PAIR_OK = new Set(["Paired", "AlreadyPaired"]);
 const UNPAIR_OK = new Set(["Unpaired", "AlreadyUnpaired"]);
 
@@ -297,7 +421,7 @@ export async function actOnDevice(action: unknown, id: unknown, runner: Runner =
   const status = typeof r.status === "string" ? r.status : "";
   if (action === "pair") return PAIR_OK.has(status) ? { ok: true, message: explainStatus(status) } : { ok: false, error: explainStatus(status) };
   if (action === "remove") {
-    if (!UNPAIR_OK.has(status)) return { ok: false, error: status === "Failed" ? "Windows could not remove the device." : explainStatus(status) };
+    if (!UNPAIR_OK.has(status)) return { ok: false, error: /^Code\d+$/.test(status) || status === "Failed" ? `Windows could not remove the device (${status.replace("Code", "code ")}).` : explainStatus(status) };
     known.delete(id);
     return { ok: true, message: "Device removed." };
   }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import { CameraRig } from "./rig";
-import { baseGeometry, defaultPlan, MIN_SIZE, needsHeight, planFromDrag, snapValue } from "./primitives";
+import { baseGeometry, defaultPlan, MIN_SIZE, needsHeight, planFromDrag, screenRadius, snapValue } from "./primitives";
 import { analyzeMesh, exportAsciiStl, formatReport, triangleCount } from "./analysis";
 import { isPinch, PinchTrigger, pinchRatio, Landmark } from "../vision/pinch";
 import { coverMapper } from "../vision/mapper";
@@ -199,5 +199,43 @@ describe("object-fit: cover landmark mapping", () => {
   });
   it("returns null until sizes are known", () => {
     expect(coverMapper({ w: 0, h: 0 }, { w: 10, h: 10 })).toBeNull();
+  });
+});
+
+describe("sphere size follows the mouse, not the ground plane", () => {
+  const cam = () => { const c = new THREE.PerspectiveCamera(45, 1.6, 0.1, 2000); const r = new CameraRig(c); c.updateMatrixWorld(); c.updateProjectionMatrix(); return { c, r }; };
+
+  it("grows with pixels moved and with depth, and is zero for no movement", () => {
+    expect(screenRadius(0, 10, 45, 600)).toBe(0);
+    expect(screenRadius(100, 10, 45, 600)).toBeCloseTo(screenRadius(50, 10, 45, 600) * 2, 10);
+    expect(screenRadius(100, 20, 45, 600)).toBeCloseTo(screenRadius(100, 10, 45, 600) * 2, 10);
+    expect(screenRadius(100, 10, 45, 0)).toBe(0);
+    expect(screenRadius(NaN, 10, 45, 600)).toBe(0);
+  });
+
+  it("is identical for a drag up, down, left or right of the same length (the old ground-plane method was not)", () => {
+    const { c } = cam();
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(c.quaternion);
+    const depth = new THREE.Vector3(0, 0, 0).sub(c.position).dot(forward);
+    const r = (dx: number, dy: number) => screenRadius(Math.hypot(dx, dy), depth, c.fov, 625);
+    const sizes = [r(0, -150), r(0, 150), r(-150, 0), r(150, 0)];
+    expect(new Set(sizes.map((v) => v.toFixed(6))).size).toBe(1);
+
+    // The regression: measured on the ground, the same 150 px drag gave very different sizes.
+    const ground = (dy: number) => {
+      const ray = new THREE.Raycaster(); const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+      const hit = (y: number) => { ray.setFromCamera(new THREE.Vector2(0, -(y / 625) * 2 + 1), c); const o = new THREE.Vector3(); ray.ray.intersectPlane(plane, o); return o; };
+      return hit(330).distanceTo(hit(330 + dy));
+    };
+    expect(ground(-150) / ground(150)).toBeGreaterThan(1.5);
+  });
+
+  it("never gets smaller as the mouse moves further away", () => {
+    const radii = [0, 20, 60, 120, 240].map((px) => screenRadius(px, 11, 45, 625));
+    for (let i = 1; i < radii.length; i++) expect(radii[i]).toBeGreaterThan(radii[i - 1]);
+    // and a sphere drawn from that radius is a proper sphere sitting on the ground
+    const p = planFromDrag("sphere", { x: 0, z: 0 }, { x: radii[3], z: 0 }, 0, 0);
+    expect(p.dimensions.x).toBeCloseTo(radii[3] * 2, 10);
+    expect(p.position.y).toBeCloseTo(radii[3], 10);
   });
 });

@@ -8,7 +8,7 @@ import { ADDITION, SUBTRACTION, Brush, Evaluator } from "three-bvh-csg";
 import { CameraRig } from "./rig";
 import {
   baseGeometry, defaultPlan, DEFAULT_SNAP, describePlan, GroundPoint, MAX_COORD, MAX_SIZE, MIN_SIZE, needsHeight,
-  planFromDrag, PrimitivePlan, ShapeKind, Vec3,
+  planFromDrag, PrimitivePlan, screenRadius, ShapeKind, Vec3,
 } from "./primitives";
 import { analyzeMesh, exportAsciiStl, formatReport, MAX_BOOLEAN_TRIANGLES, StlUnit, triangleCount } from "./analysis";
 import { RefTable, validatePlan, type SceneObjectSummary, type StudioOp } from "../../../src/core/modelOps";
@@ -481,8 +481,17 @@ export class StudioScene {
     const d = this.draw;
     if (d) {
       if (d.stage === "footprint") {
-        const g = this.groundPoint(e);
-        if (g) d.current = g;
+        if (d.kind === "sphere") {
+          // Follow the mouse on screen (same growth in every direction), not the ground plane.
+          const anchor = new THREE.Vector3(d.anchor.x, 0, d.anchor.z);
+          const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+          const depth = anchor.sub(this.camera.position).dot(forward);
+          const r = screenRadius(Math.hypot(e.clientX - d.downX, e.clientY - d.downY), depth, this.camera.fov, this.renderer.domElement.clientHeight);
+          d.current = { x: d.anchor.x + r, z: d.anchor.z };
+        } else {
+          const g = this.groundPoint(e);
+          if (g) d.current = g;
+        }
       } else {
         d.height = Math.max(0, (d.startY - e.clientY) * this.rig.unitsPerPixel(this.renderer.domElement.clientHeight));
       }

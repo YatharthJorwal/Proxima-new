@@ -141,19 +141,28 @@ process / input / output on the left, devices / activity / map on the right).
     device list with Bluetooth profiles/services such as "Generic Access
     Profile" hidden (`ui/src/lib/devices.ts`; the Home card is filtered the
     same way). Backend: `src/commands/bluetooth.ts`, one Windows PowerShell 5.1
-    script using the WinRT `DeviceInformation` pairing APIs (list, scan, pair,
-    unpair) and `BluetoothApis.dll` `BluetoothSetServiceState` for
-    connect/disconnect (classic devices only; Low Energy devices can be listed
-    and removed). The action and device id travel in env vars, never in the
-    script text; the main process only accepts ids that appeared in the last
-    list/scan; one Windows Bluetooth call at a time; 40-45 s timeouts. IPC:
-    `proxy:bt-list`, `proxy:bt-scan`, `proxy:bt-action`,
-    `proxy:open-bluetooth-settings` (fixed `ms-settings:bluetooth`).
-    **Verified only with mocks**: PowerShell 7 parse, the C# interop compiles
-    and its struct is the 560 bytes Windows needs, every action's JSON shape
-    and error path, plus unit tests. NOT verified against real Bluetooth
-    hardware. If scan finds nothing, or Connect fails on a device, start with
-    `bluetooth.ts` (WinRT `FindAllAsync` selectors, the service GUID list).
+    script. **Classic devices** (headphones, speakers, phones) use the Win32
+    API in `BluetoothApis.dll` through a small C# class: `BluetoothFindFirstDevice`
+    for the paired list and for the nearby-device inquiry, `BluetoothAuthenticateDeviceEx`
+    to pair, `BluetoothRemoveDevice` to remove, `BluetoothSetServiceState` to
+    connect/disconnect. Device ids are `bt:<12 hex digits>`. **Low Energy**
+    devices (`le:<id>`) are listed best-effort through the Windows Runtime
+    (oldest `FindAllAsync(string)` overload only, wrapped so any failure just
+    leaves them out) and can be removed; they cannot be scanned for, paired or
+    connected from here (Windows Settings does that). History: the first
+    version used the 3-argument `FindAllAsync(aqs, props, kind)` and the user's
+    Windows PowerShell rejected it ("Cannot find an overload ... argument
+    count: 3"), which is why scan/list failed; it was replaced by the Win32 path.
+    The action and device id travel in env vars, never in the script text; the
+    main process only accepts ids that appeared in the last list/scan; one
+    Windows Bluetooth call at a time; 40-45 s timeouts. IPC: `proxy:bt-list`,
+    `proxy:bt-scan`, `proxy:bt-action`, `proxy:open-bluetooth-settings` (fixed
+    `ms-settings:bluetooth`).
+    **Verified only with mocks**: PowerShell 7 parse, the C# compiles and its
+    structs are the sizes Windows requires (DEVICE_INFO 560, SEARCH_PARAMS 40),
+    all actions run through the real PowerShell logic against a fake Bluetooth
+    class, plus unit tests. NOT verified against real Bluetooth hardware.
+    The C# must stay C# 5 compatible (Windows PowerShell 5.1 compiles it).
   - **Memory page:** a single Select button turns on checkboxes (Select all,
     Delete selected); outside Select mode there are none. Per-fact Delete and
     Edit both ask first (Edit asks at Save and shows before/after). The fact
@@ -162,7 +171,12 @@ process / input / output on the left, devices / activity / map on the right).
     Memory / CPU time toggle, so six metric cards plus the tall Bluetooth card
     fill the grid.
   - **Studio:** inspector sections have consistent spacing, overlays can no
-    longer be text-selected by accident.
+    longer be text-selected by accident. A sphere's size now follows the
+    on-screen drag distance (`screenRadius` in `primitives.ts`) instead of the
+    ground-plane distance, which perspective stretched ~2x for vertical drags
+    (up/down made it balloon). Cylinders, cones and tori still size on the
+    ground plane so their rim stays under the cursor.
+  - **Memory card** shows about six facts and scrolls for the rest.
 - **Neural chain** (Home, bottom left): a 3D layered graph, one layer per
   pipeline stage (Listen, Understand, Analyze, Act, Respond, Speak). The
   active layer lights and pulses travel in when the stage changes, driven by
