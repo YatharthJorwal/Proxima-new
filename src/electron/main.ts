@@ -69,7 +69,7 @@ import { chat } from "../core/llm";
 import { addManualFact, clearStoredFacts, deleteStoredFacts, getStoredFacts, updateStoredFact } from "../core/memory";
 import { getInstructions, setInstructions } from "../core/instructions";
 import { planModelEdit } from "../core/modelOps";
-import { actOnDevice, listPairedDevices, scanForDevices } from "../commands/bluetooth";
+import { actOnDevice, listPairedDevices, scanForDevices, setOwnerWindowProvider } from "../commands/bluetooth";
 
 const HOTKEY = process.env.PROXY_HOTKEY || "F9";
 const MAX_TYPED_INPUT_LENGTH = 1000;
@@ -254,6 +254,13 @@ function wireRendererCommands() {
   // The news reader's "open in my browser" button. https only.
   ipcMain.on("proxy:open-external", (_event, url) => {
     if (typeof url === "string" && url.length < 2000 && /^https:\/\//i.test(url)) void shell.openExternal(url);
+  });
+  // Windows' Bluetooth pairing prompt is parented to this window so it opens on top of the app.
+  setOwnerWindowProvider(() => {
+    if (!mainWindow || mainWindow.isDestroyed()) return null;
+    const handle = mainWindow.getNativeWindowHandle();
+    const value = handle.length >= 8 ? handle.readBigUInt64LE(0) : BigInt(handle.readUInt32LE(0));
+    return value.toString();
   });
   // Bluetooth & devices card. Device ids are only accepted if Windows returned them in the last list/scan.
   ipcMain.handle("proxy:bt-list", () => listPairedDevices());

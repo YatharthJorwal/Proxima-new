@@ -39,3 +39,23 @@ export class PinchTrigger {
     return false;
   }
 }
+
+/**
+ * A pinch trigger that can be switched off by a condition (e.g. "only while
+ * I'm looking at the screen"). A pinch that BEGINS while not allowed is
+ * ignored until the fingers open, so looking back at the screen with your
+ * fingers still pinched doesn't fire it late.
+ */
+export class GatedPinch {
+  private readonly trigger = new PinchTrigger();
+  private suppressed = false;
+
+  reset(): void { this.trigger.reset(); this.suppressed = false; }
+
+  update(pinching: boolean, allowed: boolean, now: number): boolean {
+    if (!pinching) { this.suppressed = false; return this.trigger.update(false, now); }
+    if (!allowed) { this.suppressed = true; return false; }
+    if (this.suppressed) return false;
+    return this.trigger.update(true, now);
+  }
+}

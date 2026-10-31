@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useEngine } from "./bridge/store";
+import { CalibrationOverlay } from "./components/CalibrationOverlay";
+import { GazeLayer } from "./components/GazeLayer";
 import { INPUT_ID } from "./components/InputPanel";
 import { PAGES, PageId, Sidebar } from "./components/Sidebar";
 import { SettingsModal } from "./components/SettingsModal";
@@ -59,6 +61,8 @@ export function App() {
         </main>
       </div>
       {settingsOpen && <SettingsModal onClose={closeSettings} />}
+      <GazeLayer />
+      <CalibrationOverlay />
     </div>
   );
 }

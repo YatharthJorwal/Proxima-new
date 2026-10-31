@@ -1,7 +1,49 @@
 # Eye tracking: scope
 
-Status: **scoped, not built.** Written alongside the Camera page, which already
-does hand tracking (MediaPipe `HandLandmarker`) and the pinch trigger.
+Status: **phases 1 and 2 are built** (attention, and calibrated region gaze with
+a card highlight). Phase 3 (dwell actions) is deliberately not built.
+
+## As built
+
+- **Where:** `ui/src/vision/` — `gaze.ts` (iris/eye-corner features from the 478
+  face landmarks), `calibration.ts` (nine-point ridge fit + honest
+  leave-one-target-out error), `attention.ts` (looking / away / no face, with
+  hysteresis), `filter.ts` (One Euro smoothing), `screen.ts` (window <-> screen),
+  `gazeEngine.ts` (the engine, every browser dependency injected),
+  `gazeStore.ts` (browser wiring), `faceSource.ts` (MediaPipe `FaceLandmarker`).
+  UI: the Eye tracking card on the Camera page, a full-window calibration
+  screen, an optional gaze dot, a card highlight, and an always-visible
+  "Eye tracking" indicator in the top bar while it runs.
+- **Setup:** `npm run setup:cv` now also downloads `models/face_landmarker.task`
+  (`npm run setup:face` for just that), then `npm run build`. The URL in
+  `scripts/download-face-model.js` is Google's published one but was NOT
+  checked from the build environment; if the download fails, save the file
+  into `models/` by hand.
+- **Use:** turn the camera on, turn Eye tracking on, press Calibrate and look
+  at each of the nine dots (about 25 seconds). Attention works without
+  calibrating; the gaze dot and card highlight need it. Calibration is saved
+  (localStorage) per display and survives moving the window; it is discarded if
+  the screen size changes.
+- **Decisions taken** (you hadn't answered the questions below, so I chose the
+  conservative option): gaze only ever **suppresses**. The one effect it has on
+  anything is the optional "only accept the pinch trigger while I'm looking at
+  the screen" (off by default). The card highlight is cosmetic. Nothing starts
+  because you looked at it. No gaze data is stored or logged; only the
+  calibration numbers.
+- **Performance:** the face model runs at ~15 fps, independent of hand tracking.
+  Not measured on a real machine.
+- **Verified:** the maths, calibration, attention state machine, persistence,
+  pinch gate and whole engine are unit tested with synthetic faces (the test
+  face generator is `syntheticFace.ts`); the full UI flow was run in Electron
+  with that synthetic face. **NOT verified:** the real MediaPipe model, a real
+  camera, real eyes. The landmark indices are the standard face-mesh ones for
+  eye corners, lids and irises but were not checked against live output.
+- **Expect to tune:** the "looking at the screen" thresholds in
+  `ATTENTION_DEFAULTS` (attention.ts) are geometric starting values. The
+  accuracy figure on the card is leave-one-target-out error and will be worse
+  than the 0% the synthetic data shows. A few percent of the screen is typical
+  for a webcam; the whole point of showing it is that it is honest.
+
 
 ## What I checked in this repo
 

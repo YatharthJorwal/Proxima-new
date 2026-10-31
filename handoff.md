@@ -177,6 +177,21 @@ process / input / output on the left, devices / activity / map on the right).
     (up/down made it balloon). Cylinders, cones and tori still size on the
     ground plane so their rim stays under the cursor.
   - **Memory card** shows about six facts and scrolls for the rest.
+- **Round 5 (all on `react-shell`):**
+  - **Eye tracking** (phases 1 and 2 of `docs/eye-tracking-scope.md`): see that
+    file for the "as built" notes, what is verified (synthetic faces only) and
+    what to tune. Needs `npm run setup:cv` for `models/face_landmarker.task`.
+    Test-only seam: setting `window.__PROXIMA_FAKE_FACE__ = true` swaps in a
+    synthetic face; the app never sets it.
+  - **Bluetooth pairing** hardened (`src/commands/bluetooth.ts`): tolerant of a
+    device Windows hasn't cached, tries general bonding, dedicated bonding,
+    no-MITM and then the legacy PIN 0000, stops at once if the person cancels,
+    parents Windows' prompt to the Proxima window (`PROXIMA_BT_HWND`, falls back
+    to no owner on error 1400), enables the audio/input services, waits up to
+    8 s for the device to connect and reports `Paired` vs `PairedNotConnected`,
+    and allows 120 s for the person to respond. The retry logic was exercised
+    in PowerShell 7 against a fake Bluetooth class (nine scenarios); real
+    hardware behaviour is still unverified.
 - **Neural chain** (Home, bottom left): a 3D layered graph, one layer per
   pipeline stage (Listen, Understand, Analyze, Act, Respond, Speak). The
   active layer lights and pulses travel in when the stage changes, driven by

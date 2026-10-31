@@ -12,10 +12,11 @@
     "dashboard": "npm run build && electron .",
     "dashboard:classic": "npm run build && electron . --classic",
     "package:win": "npm run build && electron-builder --win nsis",
-    "setup:cv": "node scripts/download-hand-model.js",
+    "setup:cv": "node scripts/download-hand-model.js && node scripts/download-face-model.js",
     "setup:whisper": "node scripts/setup-whisper.js",
     "setup:gmail": "node scripts/gmail-auth.js",
-    "test": "vitest run"
+    "test": "vitest run",
+    "setup:face": "node scripts/download-face-model.js"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.0.0",

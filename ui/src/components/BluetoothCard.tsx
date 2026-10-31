@@ -23,6 +23,7 @@ export function BluetoothCard({ state }: { state: EngineState }) {
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [acting, setActing] = useState<BtAction | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
   const [scan, setScan] = useState<ScanState | null>(null);
   const [removing, setRemoving] = useState<BtDevice | null>(null);
@@ -46,14 +47,14 @@ export function BluetoothCard({ state }: { state: EngineState }) {
   }, [refresh]);
 
   const act = async (action: BtAction, d: BtDevice, doneText?: string) => {
-    setBusyId(d.id); setNotice(null);
+    setBusyId(d.id); setActing(action); setNotice(null);
     try {
       const r = await window.proxy?.btAction(action, d.id);
       if (!r) setNotice({ ok: false, text: "Bluetooth management is unavailable." });
       else if (r.ok) { setNotice({ ok: true, text: doneText ?? r.message }); if (action === "pair") setScan((s) => (s ? { ...s, results: s.results.filter((x) => x.id !== d.id) } : s)); }
       else setNotice({ ok: false, text: r.error });
     } catch { setNotice({ ok: false, text: "Windows did not answer." }); }
-    finally { setBusyId(null); await refresh(); }
+    finally { setBusyId(null); setActing(null); await refresh(); }
   };
 
   const startScan = async () => {
@@ -114,6 +115,14 @@ export function BluetoothCard({ state }: { state: EngineState }) {
               <button type="button" className="link-btn" onClick={() => setScan(null)}>{scan.phase === "scanning" ? "Hide" : "Done"}</button>
             </header>
             {scan.phase === "scanning" && <p className="note"><i className="step-spinner inline-spinner" aria-hidden="true" /> This takes about 10 seconds. Put the device in pairing mode and keep it close.</p>}
+            {acting === "pair" && (
+              <p className="bt-notice" role="status">
+                <span>Pairing… Windows may show a prompt on screen (over this window) or ask you to confirm on the device. Keep the device in pairing mode. This can take up to a minute.</span>
+              </p>
+            )}
+            {notice && !notice.ok && notice.text.includes("Windows Bluetooth settings") && (
+              <p className="note">Some devices can only be paired from Windows Settings.</p>
+            )}
             {scan.error && <p className="bt-notice bad" role="alert">{scan.error}</p>}
             {scan.phase === "done" && !scan.error && scan.results.length === 0 && <p className="empty">No new devices found. Make sure it is in pairing mode, then try again.</p>}
             <ul className="bt-list">

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { actOnDevice, listPairedDevices, normalizeDevices, parseScriptOutput, Runner, scanForDevices, _testing, explainStatus, SCRIPT, DEFINITIONS, DISPATCH } from "./bluetooth";
+import { actOnDevice, listPairedDevices, normalizeDevices, parseScriptOutput, Runner, scanForDevices, setOwnerWindowProvider, PAIR_TIMEOUT_MS, ACTION_TIMEOUT_MS, _testing, explainStatus, SCRIPT, DEFINITIONS, DISPATCH } from "./bluetooth";
 
 const dev = (over: Record<string, unknown> = {}) => ({ id: "Bluetooth#A", name: "JBL TUNE770NC", paired: true, connected: true, kind: "classic", ...over });
 const answer = (obj: unknown): Runner => vi.fn().mockResolvedValue(`noise\n${JSON.stringify(obj)}\n`);
@@ -81,7 +81,7 @@ describe("acting on a device", () => {
     const runner = answer({ ok: true, status: "Unpaired" });
     const r = await actOnDevice("remove", "Bluetooth#A", runner, "win32");
     expect(r).toEqual({ ok: true, message: "Device removed." });
-    expect(runner).toHaveBeenCalledWith("remove", "Bluetooth#A", expect.any(Number));
+    expect(runner).toHaveBeenCalledWith("remove", "Bluetooth#A", expect.any(Number), undefined);
     expect(_testing.known.has("Bluetooth#A")).toBe(false); // gone from the whitelist
   });
 
@@ -95,6 +95,36 @@ describe("acting on a device", () => {
     await seed();
     expect(await actOnDevice("remove", "Bluetooth#A", answer({ ok: true, status: "Code5" }), "win32")).toMatchObject({ ok: false, error: expect.stringContaining("code 5") });
     expect(_testing.known.has("Bluetooth#A")).toBe(true); // still in the list
+  });
+
+  it("hands the Proxima window to pairing so Windows' prompt opens on top, and waits longer for it", async () => {
+    await seed();
+    setOwnerWindowProvider(() => "263412");
+    const runner = answer({ ok: true, status: "Paired" });
+    await actOnDevice("pair", "Bluetooth#A", runner, "win32");
+    expect(runner).toHaveBeenCalledWith("pair", "Bluetooth#A", PAIR_TIMEOUT_MS, "263412");
+    expect(PAIR_TIMEOUT_MS).toBeGreaterThan(ACTION_TIMEOUT_MS);
+  });
+
+  it("still works if the window handle can't be read", async () => {
+    await seed();
+    setOwnerWindowProvider(() => { throw new Error("destroyed"); });
+    const runner = answer({ ok: true, status: "Paired" });
+    expect(await actOnDevice("pair", "Bluetooth#A", runner, "win32")).toMatchObject({ ok: true });
+    expect(runner.mock.calls[0][3]).toBeUndefined();
+  });
+
+  it("tells the difference between paired-and-connected and paired-but-not-yet-connected", async () => {
+    await seed();
+    const ok = await actOnDevice("pair", "Bluetooth#A", answer({ ok: true, status: "Paired" }), "win32");
+    const later = await actOnDevice("pair", "Bluetooth#A", answer({ ok: true, status: "PairedNotConnected" }), "win32");
+    expect(ok).toMatchObject({ ok: true, message: "Paired and connected." });
+    expect(later).toMatchObject({ ok: true, message: expect.stringContaining("press Connect") });
+  });
+
+  it("explains the prompt-could-not-be-shown and timeout codes", () => {
+    expect(explainStatus("Code1400")).toContain("Windows Bluetooth settings");
+    expect(explainStatus("Code1460")).toContain("pairing mode");
   });
 
   it("translates pairing outcomes into plain language", async () => {

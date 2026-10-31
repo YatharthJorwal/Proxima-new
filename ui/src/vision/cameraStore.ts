@@ -10,7 +10,7 @@
  */
 import { useSyncExternalStore } from "react";
 import { triggerVoice } from "../bridge/store";
-import { isPinch, Landmark, PinchTrigger } from "./pinch";
+import { GatedPinch, isPinch, Landmark } from "./pinch";
 
 export type CameraPhase = "off" | "starting" | "on";
 export type HandPhase = "off" | "loading" | "on";
@@ -42,7 +42,14 @@ let landmarker: { detectForVideo(v: HTMLVideoElement, t: number): { landmarks: L
 let connections: HandFrame["connections"] = [];
 let raf = 0;
 let lastRun = 0;
-const trigger = new PinchTrigger();
+const trigger = new GatedPinch();
+let pinchGate: () => boolean = () => true;
+
+/** Lets another module (eye tracking) veto the pinch trigger without this file knowing about it. */
+export function setPinchGate(fn: () => boolean): void { pinchGate = fn; }
+export const getCameraState = (): CameraState => state;
+/** The hidden <video> the trackers read frames from (null until the camera has started). */
+export const getCameraVideo = (): HTMLVideoElement | null => video;
 
 function set(patch: Partial<CameraState>): void {
   state = { ...state, ...patch };
@@ -50,6 +57,7 @@ function set(patch: Partial<CameraState>): void {
 }
 
 const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l); }; };
+export const subscribeCamera = subscribe;
 export const useCamera = (): CameraState => useSyncExternalStore(subscribe, () => state);
 export function onHandFrame(cb: (frame: HandFrame) => void): () => void {
   frameListeners.add(cb);
@@ -71,7 +79,7 @@ function loop(): void {
   }
   emitFrame(hands);
   if (hands.length !== state.hands) set({ hands: hands.length });
-  if (state.pinch && trigger.update(hands.length > 0 && isPinch(hands[0]), now)) triggerVoice();
+  if (state.pinch && trigger.update(hands.length > 0 && isPinch(hands[0]), pinchGate(), now)) triggerVoice();
 }
 
 export async function startCamera(): Promise<void> {

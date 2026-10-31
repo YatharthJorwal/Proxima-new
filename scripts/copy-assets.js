@@ -155,4 +155,12 @@ if (fs.existsSync(modelSrc)) {
   );
 }
 
+// Eye tracking's face model, same idea: optional, and the dashboard says how to get it if it is missing.
+const faceModelSrc = path.join(root, "models", "face_landmarker.task");
+if (fs.existsSync(faceModelSrc)) {
+  if (fs.existsSync(path.join(root, "dist", "ui"))) copyRecursive(faceModelSrc, path.join(uiMediapipeDir, "face_landmarker.task"));
+} else {
+  console.warn("\n[copy-assets] models/face_landmarker.task not found. Eye tracking will say to run `npm run setup:cv`.\n");
+}
+
 console.log("Copied renderer assets, commands.json, vendored three.js, and vendored MediaPipe into dist/");
